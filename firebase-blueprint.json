@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User profile collection storing role and basic identity (admin, client, driver)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "email": { "type": "string", "description": "Email address" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "role": { 
+          "type": "string", 
+          "enum": ["admin", "client", "driver"],
+          "description": "Role of the user in the system" 
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "role"]
+    },
+    "stores": {
+      "title": "Stores and Services",
+      "description": "Stores, restaurants, and service providers",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "workingHours": { "type": "string" },
+        "serviceType": { "type": "string", "enum": ["delivery", "pickup", "both"] },
+        "deliveryFeeType": { "type": "string", "enum": ["fixed", "distance"] },
+        "fixedDeliveryFee": { "type": "number" },
+        "allowReturns": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["open", "closed", "maintenance"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "status"]
+    },
+    "products": {
+      "title": "Products",
+      "description": "Products available in stores",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "storeId": { "type": "string" },
+        "storeName": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "inStock": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "sku": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "price", "categoryId", "status"]
+    },
+    "orders": {
+      "title": "Orders",
+      "description": "Main application orders linked with client Flutter app and driver Flutter app",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "description": "Unique Order ID" },
+        "clientId": { "type": "string", "description": "Customer UID who created the order" },
+        "driverId": { "type": "string", "description": "Driver UID assigned to the order (null initially)" },
+        "items": { "type": "array", "description": "List of ordered products/items" },
+        "totalPrice": { "type": "number", "description": "Total order amount in YER" },
+        "location": { "type": "string", "description": "Delivery address or location object" },
+        "status": { 
+          "type": "string", 
+          "enum": ["NEW", "PREPARING", "DELIVERING", "COMPLETED", "CANCELLED"],
+          "description": "Lifecycle status of the order" 
+        },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["clientId", "items", "totalPrice", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "users",
+      "description": "User profiles collection"
+    },
+    "stores/{storeId}": {
+      "schema": "stores",
+      "description": "Stores collection"
+    },
+    "products/{productId}": {
+      "schema": "products",
+      "description": "Products collection"
+    },
+    "orders/{orderId}": {
+      "schema": "orders",
+      "description": "Orders collection"
+    }
+  }
+}

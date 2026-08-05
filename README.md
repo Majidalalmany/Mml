@@ -1,11 +1,100 @@
-<div align="center">
+# لوحة تحكم إدارة المتاجر والخدمات (Multi-Vendor Admin Platform)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+لوحة تحكم إدارية حديثة ومبسطة بالكامل مبنية بأحدث التقنيات:
+- **React 18**
+- **TypeScript**
+- **Vite**
+- **Tailwind CSS**
+- **Firebase Firestore / Auth**
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🌟 أبرز التحديثات والتعديلات الهيكلية (UX/UI Overhaul)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+تعديل وتحديث واجهة المستخدم بالكامل لتقديم تجربة إدارية فائقة السلاسة وسريعة للوصول للمعلومات:
 
-</div>
+1. **نظام تنقل متعدد الصفحات مباشر عبر القائمة الجانبية (Sidebar Navigation)**:
+   - إزالة بطاقات الأقسام العلوية المكثفة التي كانت تسبب تشتتاً للمستخدم.
+   - نقل جميع تصنيفات الخدمات (المطاعم، الصيدليات، السوبرماركت، الإلكترونيات، الورود، الحلويات، اللحوم) مباشرة داخل القائمة الجانبية كقائمة منسدلة أنيقة.
+   - إضافة خيار دائم في نهاية القائمة `+ إضافة خدمة جديدة`.
+
+2. **تبسيط صفحة تفاصيل المتجر (Store Details Simplification)**:
+   - إعادة تصميم هيدر المتجر ليعرض الحقول الـ 5 الأساسية فقط:
+     - **اسم المتجر / المطعم**
+     - **شعار المتجر (Logo)**
+     - **رقم المتجر / الهاتف**
+     - **تاريخ الإنشاء**
+     - **العنوان والموقع**
+   - إزالة التعقيد البصري والبانرات الضخمة المشتتة.
+
+3. **قسم إدارة منتجات المتجر المدمج (Embedded Product Management)**:
+   - تم وضع قسم إدارة المنتجات مباشرة أسفل بيانات المتجر الأساسية.
+   - يتضمن خيارات: البحث الفوري، الفلترة حسب قسم المتجر، إضافة منتج جديد، تعديل، حذف، وتغيير التوفر بضغطة زر.
+
+4. **تبسيط نموذج إضافة/تعديل المتجر (Store Form Simplification)**:
+   - توحيد الحقول لتشمل اسم المتجر، الشعار، رقم الهاتف، تاريخ الإنشاء، العنوان، ونوع النشاط.
+
+---
+
+## 🚀 كيفية التشغيل والإنتاج المحلي (Local Development)
+
+### 1. تثبيت الحزم (Dependencies)
+```bash
+npm install
+```
+
+### 2. تشغيل خادم التطوير (Dev Server)
+```bash
+npm run dev
+```
+سيعمل التطبيق على المنفذ المحرز `http://localhost:3000`.
+
+### 3. بناء النسخة الإنتاجية (Production Build)
+```bash
+npm run build
+```
+
+### 4. فحص جودة وتوافقية الكود (Linter & Type Check)
+```bash
+npm run lint
+```
+
+---
+
+## 🌐 خيارات النشر (Deployment Instructions)
+
+### النشر على Vercel
+1. قم بربط مستودع GitHub الخاص بالمشروع على Vercel.
+2. اختر **Vite** كـ Framework Preset.
+3. تأكد من ضبط متغيرات البيئة الخاصة بـ Firebase إن وجدت (`VITE_FIREBASE_...`).
+4. اضغط على **Deploy**.
+
+### النشر على GitHub / GitHub Pages
+1. قم برفع التغييرات إلى المستودع:
+```bash
+git add .
+git commit -m "feat: complete UX overhaul, sidebar sub-services, and simplified store detail views"
+git push origin main
+```
+
+---
+
+## 📁 هيكلية المشروع (Project Structure)
+
+```
+├── src/
+│   ├── components/
+│   │   ├── Sidebar.tsx             # القائمة الجانبية مع نظام الخدمات المنسدل
+│   │   ├── StoresManager.tsx       # إدارة قائمة المتاجر والخدمات والفلترة
+│   │   ├── StoreDetailPage.tsx     # صفحة تفاصيل المتجر المبسطة + إدارة المنتجات
+│   │   ├── StoreModal.tsx          # نموذج إضافة وتعديل المتجر
+│   │   ├── ProductModal.tsx        # نموذج إضافة وتعديل المنتجات
+│   │   ├── DashboardOverview.tsx   # لوحة الإحصائيات العامة للموقع والطلبات
+│   │   └── ...
+│   ├── lib/                        # أدوات مساعدة وإعدادات Firebase
+│   ├── types.ts                    # التعريفات والواجهات البرمجية TypeScript
+│   ├── App.tsx                     # المكون الرئيسي للتحكم بالصفحات والتنقل
+│   └── main.tsx                    # نقطة الدخول الرئيسية
+├── README.md
+└── CHANGELOG.md
+```

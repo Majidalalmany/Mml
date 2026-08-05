@@ -1,0 +1,6 @@
+{
+  "name": "لوحة تحكم إدارة المتجات والتصنيفات",
+  "description": "لوحة تحكم إدارية متكاملة لإدارة المنتجات، التصنيفات، الطلبات والعروض مع ربط مباشر بـ Firebase Firestore",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

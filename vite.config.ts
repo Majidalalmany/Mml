@@ -10,6 +10,7 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+      dedupe: ['react', 'react-dom'],
     },
     server: {
       hmr: false,
@@ -22,7 +23,10 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('react')) return 'vendor-react';
+              // فصل React و React-Dom معا في حزمة واحدة متكاملة
+              if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+                return 'vendor-react-core';
+              }
               if (id.includes('firebase')) return 'vendor-firebase';
               if (id.includes('lucide-react')) return 'vendor-icons';
               return 'vendor';

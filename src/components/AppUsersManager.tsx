@@ -106,12 +106,12 @@ export const AppUsersManager: React.FC<AppUsersManagerProps> = ({
           </div>
         </div>
 
-        <div className="bg-blue-50/80 border border-blue-200 p-3 rounded-xl max-w-md text-xs text-blue-900 flex items-start gap-2 shadow-2xs">
-          <span className="text-base shrink-0">📱</span>
+        <div className="bg-emerald-50/90 border border-emerald-200 p-3 rounded-xl max-w-md text-xs text-emerald-950 flex items-start gap-2 shadow-2xs">
+          <span className="text-base shrink-0">🔒</span>
           <div>
-            <span className="font-bold block mb-0.5 text-blue-950">تسجيل تلقائي عند استخدام التطبيق:</span>
+            <span className="font-bold block mb-0.5 text-emerald-950">عزل أمني تام (Collection Isolation):</span>
             <span>
-              حسابات العملاء لا تُنشأ يدوياً من لوحة التحكم، بل يتم تسجليها تلقائياً بمجرد تسجيل الدخول أو إنشاء حساب عبر تطبيق العملاء عند ربطه.
+              بيانات العملاء محفوظة حصراً في مجموعة <strong>clients</strong>، ومندوبو التوصيل في مجموعة <strong>drivers</strong>، والمدراء في مجموعة <strong>adminUsers</strong> مع حظر عابر لمجموعات الحسابات.
             </span>
           </div>
         </div>

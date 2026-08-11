@@ -36,3 +36,5 @@ export async function logSystemActivity({
     console.error('Failed logging activity to Firestore:', error);
   }
 }
+
+export const logAuditEvent = logSystemActivity;

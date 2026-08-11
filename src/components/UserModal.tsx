@@ -86,17 +86,20 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
-    if (!email.trim() || !email.includes('@')) {
-      setError('يرجى ادخال بريد إلكتروني صحيح');
+    if (!phone.trim()) {
+      setError('يرجى إدخال رقم الهاتف / الجوال (المعرف الأساسي والوحيد الإجباري)');
       return;
     }
 
-    if (phone.trim()) {
-      const dupCheck = checkDuplicateUserPhone(phone, users, user?.id);
-      if (dupCheck.isDuplicate) {
-        setError(`⚠️ رقم الهاتف (${phone.trim()}) مسجل مسبقاً لموظف/مستخدم آخر باسم "${dupCheck.existingName}". يرجى استخدام رقم هاتف آخر لتجنب أخطاء تكرار البيانات.`);
-        return;
-      }
+    const dupCheck = checkDuplicateUserPhone(phone, users, user?.id);
+    if (dupCheck.isDuplicate) {
+      setError(`⚠️ رقم الهاتف (${phone.trim()}) مسجل مسبقاً لموظف/مستخدم آخر باسم "${dupCheck.existingName}". يرجى استخدام رقم هاتف آخر لتجنب أخطاء تكرار البيانات.`);
+      return;
+    }
+
+    if (email.trim() && !email.includes('@')) {
+      setError('يرجى ادخال بريد إلكتروني صحيح عند إدخاله (البريد اختياري)');
+      return;
     }
 
     try {
@@ -170,41 +173,7 @@ export const UserModal: React.FC<UserModalProps> = ({
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 block">
-                البريد الإلكتروني <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                <input 
-                  type="email" 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@jahez.com"
-                  className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">
-                كلمة المرور للدخول <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Key className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                <input 
-                  type="text" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="password123"
-                  className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">
-                رقم الهاتف / الجوال
+                رقم الهاتف / الجوال (المعرف الإجباري) <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Phone className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
@@ -213,6 +182,23 @@ export const UserModal: React.FC<UserModalProps> = ({
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="77XXXXXXX"
+                  className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                البريد الإلكتروني <span className="text-slate-400 text-[10px] font-normal">(اختياري)</span>
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@jahez.com (اختياري)"
                   className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
                 />
               </div>

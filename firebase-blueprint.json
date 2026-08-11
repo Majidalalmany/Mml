@@ -1,23 +1,61 @@
 {
   "entities": {
-    "users": {
-      "title": "Users",
-      "description": "User profile collection storing role and basic identity (admin, client, driver)",
+    "adminUsers": {
+      "title": "Admin Users",
+      "description": "Exclusive collection for Admin Dashboard management staff and moderators only",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "User Firebase Auth UID" },
-        "name": { "type": "string", "description": "Full name of the user" },
-        "email": { "type": "string", "description": "Email address" },
-        "phone": { "type": "string", "description": "Phone number" },
+        "id": { "type": "string", "description": "Admin Document/Auth UID" },
+        "name": { "type": "string", "description": "Full name of the admin staff" },
+        "phone": { "type": "string", "description": "Mandatory primary phone number" },
+        "email": { "type": "string", "description": "Optional email address" },
+        "password": { "type": "string", "description": "Password or auth credentials" },
         "role": { 
           "type": "string", 
-          "enum": ["admin", "client", "driver"],
-          "description": "Role of the user in the system" 
+          "description": "Role level inside Admin Dashboard" 
         },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "storeId": { "type": "string" },
+        "permissions": { 
+          "type": "object", 
+          "description": "Granular RBAC module permissions object { view: boolean, create: boolean, edit: boolean, delete: boolean }" 
+        },
+        "createdAt": { "type": "string" }
       },
-      "required": ["uid", "name", "role"]
+      "required": ["name", "phone", "role"]
+    },
+    "clients": {
+      "title": "Clients (Customers)",
+      "description": "Exclusive collection for Flutter Client Mobile App users",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Client Firebase Auth UID" },
+        "name": { "type": "string", "description": "Customer full name" },
+        "phone": { "type": "string", "description": "Customer phone number" },
+        "email": { "type": "string", "description": "Customer email address" },
+        "gender": { "type": "string", "enum": ["male", "female", "other"] },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "role": { "type": "string", "enum": ["client"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "phone"]
+    },
+    "drivers": {
+      "title": "Drivers (Delivery Captains)",
+      "description": "Exclusive collection for Flutter Driver Mobile App captains",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Driver Firebase Auth UID" },
+        "name": { "type": "string", "description": "Captain full name" },
+        "phone": { "type": "string", "description": "Captain phone number" },
+        "vehicleType": { "type": "string", "description": "Motorcycle, Car, Van" },
+        "plateNumber": { "type": "string", "description": "Vehicle license plate number" },
+        "isOnline": { "type": "boolean", "description": "Current availability status" },
+        "status": { "type": "string", "enum": ["active", "pending", "suspended"] },
+        "role": { "type": "string", "enum": ["driver"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "phone"]
     },
     "stores": {
       "title": "Stores and Services",
@@ -32,11 +70,6 @@
         "categoryName": { "type": "string" },
         "logoUrl": { "type": "string" },
         "coverUrl": { "type": "string" },
-        "workingHours": { "type": "string" },
-        "serviceType": { "type": "string", "enum": ["delivery", "pickup", "both"] },
-        "deliveryFeeType": { "type": "string", "enum": ["fixed", "distance"] },
-        "fixedDeliveryFee": { "type": "number" },
-        "allowReturns": { "type": "boolean" },
         "status": { "type": "string", "enum": ["open", "closed", "maintenance"] },
         "createdAt": { "type": "string" }
       },
@@ -50,18 +83,13 @@
         "name": { "type": "string" },
         "description": { "type": "string" },
         "price": { "type": "number" },
-        "originalPrice": { "type": "number" },
         "categoryId": { "type": "string" },
-        "categoryName": { "type": "string" },
         "storeId": { "type": "string" },
-        "storeName": { "type": "string" },
         "imageUrl": { "type": "string" },
-        "inStock": { "type": "boolean" },
         "status": { "type": "string", "enum": ["active", "inactive"] },
-        "sku": { "type": "string" },
         "createdAt": { "type": "string" }
       },
-      "required": ["name", "price", "categoryId", "status"]
+      "required": ["name", "price", "status"]
     },
     "orders": {
       "title": "Orders",
@@ -69,26 +97,33 @@
       "type": "object",
       "properties": {
         "orderId": { "type": "string", "description": "Unique Order ID" },
-        "clientId": { "type": "string", "description": "Customer UID who created the order" },
-        "driverId": { "type": "string", "description": "Driver UID assigned to the order (null initially)" },
-        "items": { "type": "array", "description": "List of ordered products/items" },
+        "clientId": { "type": "string", "description": "Client UID from 'clients' collection" },
+        "driverId": { "type": "string", "description": "Driver UID from 'drivers' collection (null initially)" },
+        "items": { "type": "array", "description": "List of ordered products" },
         "totalPrice": { "type": "number", "description": "Total order amount in YER" },
-        "location": { "type": "string", "description": "Delivery address or location object" },
+        "location": { "type": "string", "description": "Delivery location" },
         "status": { 
           "type": "string", 
           "enum": ["NEW", "PREPARING", "DELIVERING", "COMPLETED", "CANCELLED"],
           "description": "Lifecycle status of the order" 
         },
-        "createdAt": { "type": "string", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string" }
+        "createdAt": { "type": "string" }
       },
       "required": ["clientId", "items", "totalPrice", "status"]
     }
   },
   "firestore": {
-    "users/{userId}": {
-      "schema": "users",
-      "description": "User profiles collection"
+    "adminUsers/{userId}": {
+      "schema": "adminUsers",
+      "description": "Admins & Dashboard Management staff collection"
+    },
+    "clients/{userId}": {
+      "schema": "clients",
+      "description": "Client Mobile App users collection"
+    },
+    "drivers/{userId}": {
+      "schema": "drivers",
+      "description": "Driver Mobile App captains collection"
     },
     "stores/{storeId}": {
       "schema": "stores",

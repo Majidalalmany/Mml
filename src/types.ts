@@ -87,9 +87,9 @@ export type RoleType =
 export interface AdminUser {
   id: string;
   name: string;
-  email: string;
+  phone: string;
+  email?: string;
   password?: string;
-  phone?: string;
   role: RoleType;
   storeId?: string;
   status: 'active' | 'suspended';
@@ -135,8 +135,17 @@ export interface OrderItem {
 export interface Order {
   id: string;
   orderId?: string;
+  orderNumber?: string;
   clientId?: string;
   driverId?: string | null;
+  driverName?: string | null;
+  driverPhone?: string | null;
+  invoiceNumber?: string | null;
+  invoiceImageUrl?: string | null;
+  invoiceUploadTime?: string | null;
+  invoiceDriverId?: string | null;
+  invoiceDriverName?: string | null;
+  receivedByDriverAt?: string | null;
   customerName: string;
   customerPhone?: string;
   storeId?: string;
@@ -211,14 +220,36 @@ export interface FazaaOrder {
   scheduledDatetime?: string;
   notes?: string;
   attachmentUrl?: string;
+  invoiceImageUrl?: string | null;
+  invoiceUploadTime?: string | null;
+  invoiceDriverId?: string | null;
+  invoiceDriverName?: string | null;
   customerName: string;
   customerPhone: string;
   customerId?: string;
   driverName?: string;
   driverPhone?: string;
+  driverId?: string;
   status: 'new' | 'assigned' | 'delivering' | 'completed' | 'cancelled';
   createdAt?: any;
   updatedAt?: any;
+}
+
+export interface InvoiceReceipt {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  orderType?: 'regular' | 'fazaa' | 'manfaa';
+  driverId: string;
+  driverName: string;
+  driverPhone?: string;
+  customerName?: string;
+  storeName?: string;
+  imageUrl: string;
+  uploadedAt: string;
+  amount?: number;
+  notes?: string;
+  createdAt?: any;
 }
 
 export interface FazaaCategory {
@@ -238,6 +269,51 @@ export interface AppUser {
   gender: 'male' | 'female' | 'other';
   email?: string;
   avatarUrl?: string;
+  status?: 'active' | 'blocked';
+  role?: 'client';
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface ActiveDeliveryOrder {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  storeName?: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  deliveryAddress?: string;
+  destLat?: number;
+  destLng?: number;
+  pickupLat?: number;
+  pickupLng?: number;
+  fee?: number;
+  status: 'delivering' | 'assigned' | 'arrived' | 'new' | 'completed' | 'cancelled';
+  estimatedMinutes?: number;
+  distanceKm?: number;
+  invoiceImageUrl?: string | null;
+  invoiceUploadTime?: string | null;
+  invoiceDriverName?: string | null;
+}
+
+export interface DriverUser {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  vehicleType?: string;
+  plateNumber?: string;
+  isOnline?: boolean;
+  status?: 'active' | 'pending' | 'suspended';
+  role?: 'driver';
+  lat?: number;
+  lng?: number;
+  locationName?: string;
+  speed?: number;
+  assignedOrdersCount?: number;
+  activeOrder?: ActiveDeliveryOrder;
+  lastActive?: string;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -257,6 +333,7 @@ export type TabType =
   | 'notifications' 
   | 'discounts' 
   | 'orders' 
+  | 'invoices'
   | 'reports' 
   | 'financial' 
   | 'admin' 

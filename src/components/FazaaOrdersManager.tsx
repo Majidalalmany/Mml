@@ -24,6 +24,10 @@ import {
   Zap,
   Edit2,
   Trash2,
+  DollarSign,
+  Save,
+  Calculator,
+  Navigation,
   X
 } from 'lucide-react';
 import { FazaaOrder, FazaaCategory, AdminUser } from '../types';
@@ -1299,12 +1303,22 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
 
             <div className="p-5 space-y-3 text-xs">
               <p><strong className="text-slate-400">العميل:</strong> {viewingOrder.customerName} ({viewingOrder.customerPhone})</p>
-              <p><strong className="text-slate-400">من:</strong> {viewingOrder.pickupAddress}</p>
-              <p><strong className="text-slate-400">إلى:</strong> {viewingOrder.deliveryAddress}</p>
+              <p><strong className="text-slate-400">من (موقع الاستلام):</strong> {viewingOrder.pickupAddress}</p>
+              <p><strong className="text-slate-400">إلى (موقع التسليم):</strong> {viewingOrder.deliveryAddress}</p>
               <p><strong className="text-slate-400">نوع الشحنة:</strong> {viewingOrder.orderType}</p>
+              <p><strong className="text-slate-400">الكابتن/المندوب:</strong> {viewingOrder.driverName || 'لم يعين بعد'}</p>
               <p><strong className="text-slate-400">النطاق:</strong> {viewingOrder.orderScope === 'international' ? 'دولية' : 'محلية'}</p>
               <p><strong className="text-slate-400">التوقيت:</strong> {viewingOrder.isInstant ? 'فوراً ("الآن")' : `مجدول (${viewingOrder.scheduledDatetime})`}</p>
               {viewingOrder.notes && <p><strong className="text-slate-400">ملاحظات:</strong> {viewingOrder.notes}</p>}
+              
+              {viewingOrder.invoiceImageUrl && (
+                <div className="pt-2 border-t space-y-1">
+                  <span className="font-bold text-slate-800 block">صورة الفاتورة المرفوعة من المندوب:</span>
+                  <div className="p-2 bg-slate-900 rounded-xl flex justify-center max-h-48">
+                    <img src={viewingOrder.invoiceImageUrl} alt="صورة الفاتورة" className="max-h-44 object-contain rounded" />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-4 bg-gray-50 border-t flex justify-end">

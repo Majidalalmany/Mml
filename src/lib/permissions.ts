@@ -28,6 +28,7 @@ export const ALL_MODULES = [
   { id: 'notifications', label: 'الإشعارات والتنبيهات' },
   { id: 'discounts', label: 'التخفيضات والعمولات' },
   { id: 'orders', label: 'إدارة الطلبات' },
+  { id: 'invoices', label: 'معرض وفواتير المندوبين' },
   { id: 'reports', label: 'التقارير المالية والأداء' },
   { id: 'financial', label: 'الإدارة المالية' },
   { id: 'admin', label: 'إدارة المستخدمين والصلاحيات' },

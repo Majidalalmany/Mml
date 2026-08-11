@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ShoppingBag, 
   Clock, 
@@ -17,24 +17,72 @@ import {
   Store as StoreIcon, 
   RefreshCw, 
   ShieldAlert, 
-  FileText,
-  Printer,
-  ChevronDown,
-  User,
-  Calendar
+  FileText, 
+  Printer, 
+  ChevronDown, 
+  User, 
+  Calendar,
+  Lock,
+  Check,
+  Receipt,
+  Smartphone,
+  Navigation,
+  UserCheck,
+  Camera
 } from 'lucide-react';
-import { Order, OrderStatus, Store, AdminUser } from '../types';
+import { Order, OrderStatus, Store, AdminUser, DriverUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
+import { db, collection, addDoc, onSnapshot, query } from '../lib/firebase';
 
 export { ORDER_STATUS_CONFIG };
+
+// Default captains fallback list
+const DEFAULT_DRIVERS: DriverUser[] = [
+  {
+    id: 'drv-sanaa-1',
+    name: 'الكابتن أحمد الصنعاني',
+    phone: '771234567',
+    vehicleType: 'دراجة نارية',
+    plateNumber: 'صنعاء 1234-أ',
+    isOnline: true,
+    status: 'active'
+  },
+  {
+    id: 'drv-aden-2',
+    name: 'الكابتن محمد العدني',
+    phone: '739876543',
+    vehicleType: 'سيارة',
+    plateNumber: 'عدن 5678-ب',
+    isOnline: true,
+    status: 'active'
+  },
+  {
+    id: 'drv-taiz-3',
+    name: 'الكابتن طارق التعزي',
+    phone: '711223344',
+    vehicleType: 'دراجة نارية',
+    plateNumber: 'تعز 9101-ج',
+    isOnline: true,
+    status: 'active'
+  },
+  {
+    id: 'drv-mukalla-4',
+    name: 'الكابتن عمر الحضرمي',
+    phone: '700112233',
+    vehicleType: 'سيارة',
+    plateNumber: 'حضرموت 3322-د',
+    isOnline: true,
+    status: 'active'
+  }
+];
 
 interface OrdersManagerProps {
   orders: Order[];
   stores: Store[];
   currentUser: AdminUser | null;
   isLoading: boolean;
-  onUpdateOrderStatus: (orderId: string, newStatus: OrderStatus) => Promise<void>;
+  onUpdateOrderStatus: (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => Promise<void>;
   onCreateOrder?: (orderData: Partial<Order>) => Promise<void>;
   onSeedOrders?: () => Promise<void>;
 }
@@ -48,13 +96,33 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   onCreateOrder,
   onSeedOrders
 }) => {
+  // Mode switcher: 'admin' (الإدارة) or 'driver' (تطبيق المندوب)
+  const [activeViewMode, setActiveViewMode] = useState<'admin' | 'driver'>('admin');
+
+  // Admin filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('all');
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
-  // New order modal state
+  // Driver Assignment Modal State
+  const [isAssignDriverModalOpen, setIsAssignDriverModalOpen] = useState(false);
+  const [orderToAssign, setOrderToAssign] = useState<Order | null>(null);
+  const [driverSearchTerm, setDriverSearchTerm] = useState('');
+
+  // Drivers List (Fetched from Firestore + fallback)
+  const [drivers, setDrivers] = useState<DriverUser[]>(DEFAULT_DRIVERS);
+  const [selectedDriverId, setSelectedDriverId] = useState<string>('drv-sanaa-1');
+
+  // Driver Receipt & Invoice Modal State
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [orderForInvoice, setOrderForInvoice] = useState<Order | null>(null);
+  const [invoiceInput, setInvoiceInput] = useState('');
+  const [invoiceImagePreview, setInvoiceImagePreview] = useState<string | null>(null);
+  const [isSubmittingInvoice, setIsSubmittingInvoice] = useState(false);
+
+  // New manual order modal state
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('771234567');
@@ -68,11 +136,52 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   // Authorization check
   const canEditOrders = hasModulePermission(currentUser, 'orders', 'edit');
+  const canCancelOrders = 
+    currentUser?.role === 'super_admin' ||
+    currentUser?.role === 'vice_admin' ||
+    currentUser?.role === 'developer' ||
+    (currentUser?.role as string) === 'admin' ||
+    (currentUser?.role as string) === 'manager' ||
+    currentUser?.email === 'admin@gmail.com' ||
+    hasModulePermission(currentUser, 'orders', 'delete');
 
   const safeOrders = orders || [];
   const safeStores = stores || [];
 
-  // Filtered orders
+  // Firestore Realtime Drivers Listener
+  useEffect(() => {
+    try {
+      const driversQuery = query(collection(db, 'drivers'));
+      const unsubscribe = onSnapshot(driversQuery, (snapshot) => {
+        const fetchedList: DriverUser[] = snapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as DriverUser[];
+
+        if (fetchedList.length > 0) {
+          // Merge fetched with defaults to ensure complete list
+          const combined = [...fetchedList];
+          DEFAULT_DRIVERS.forEach(defDrv => {
+            if (!combined.some(d => d.id === defDrv.id || d.phone === defDrv.phone)) {
+              combined.push(defDrv);
+            }
+          });
+          setDrivers(combined);
+        } else {
+          setDrivers(DEFAULT_DRIVERS);
+        }
+      }, (err) => {
+        console.warn('Drivers listener fallback:', err);
+        setDrivers(DEFAULT_DRIVERS);
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      setDrivers(DEFAULT_DRIVERS);
+    }
+  }, []);
+
+  // Filtered orders for Admin View
   const filteredOrders = useMemo(() => {
     return safeOrders.filter((order) => {
       // Status filter
@@ -95,8 +204,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         const phoneMatch = order.customerPhone?.toLowerCase().includes(term);
         const storeMatch = order.storeName?.toLowerCase().includes(term);
         const addressMatch = order.address?.toLowerCase().includes(term);
+        const driverMatch = order.driverName?.toLowerCase().includes(term);
         const itemMatch = order.items?.some(i => i.productName.toLowerCase().includes(term));
-        if (!numMatch && !nameMatch && !phoneMatch && !storeMatch && !addressMatch && !itemMatch) {
+        if (!numMatch && !nameMatch && !phoneMatch && !storeMatch && !addressMatch && !driverMatch && !itemMatch) {
           return false;
         }
       }
@@ -108,6 +218,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       return timeB - timeA;
     });
   }, [safeOrders, safeStores, selectedStatusTab, selectedStoreId, searchTerm]);
+
+  // Orders assigned to selected driver in Driver View
+  const selectedDriver = drivers.find(d => d.id === selectedDriverId) || drivers[0];
+  const driverAssignedOrders = useMemo(() => {
+    if (!selectedDriver) return [];
+    return safeOrders.filter(o => 
+      o.driverId === selectedDriver.id || 
+      o.driverName === selectedDriver.name ||
+      (o.driverPhone && o.driverPhone === selectedDriver.phone)
+    ).sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [safeOrders, selectedDriver]);
 
   // Status counts
   const counts = useMemo(() => {
@@ -122,8 +247,23 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     };
   }, [safeOrders]);
 
+  // Handler for Admin status change
   const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
     if (!canEditOrders) return;
+
+    if (newStatus === 'cancelled' && !canCancelOrders) {
+      alert('عفواً، صلاحية إلغاء الطلب مخصصة حصراً لمدراء النظام والإدارة الرسمية.');
+      return;
+    }
+
+    // If changing to 'preparing', prompt driver selection modal
+    const targetOrder = safeOrders.find(o => o.id === orderId);
+    if (newStatus === 'preparing' && targetOrder) {
+      setOrderToAssign(targetOrder);
+      setIsAssignDriverModalOpen(true);
+      return;
+    }
+
     try {
       setUpdatingOrderId(orderId);
       await onUpdateOrderStatus(orderId, newStatus);
@@ -134,6 +274,92 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
+  // Handler when Admin assigns a driver and accepts order
+  const handleAssignDriverSubmit = async (driver: DriverUser) => {
+    if (!orderToAssign) return;
+    try {
+      setUpdatingOrderId(orderToAssign.id);
+      await onUpdateOrderStatus(orderToAssign.id, 'preparing', {
+        driverId: driver.id,
+        driverName: driver.name,
+        driverPhone: driver.phone
+      });
+      setIsAssignDriverModalOpen(false);
+      setOrderToAssign(null);
+    } catch (err) {
+      console.error('Failed assigning driver:', err);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  // Handle File change for Invoice Photo
+  const handleInvoiceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setInvoiceImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Handler for Driver to save invoice photo & number and receive/deliver order
+  const handleSaveInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orderForInvoice || (!invoiceImagePreview && !invoiceInput.trim())) return;
+
+    try {
+      setIsSubmittingInvoice(true);
+      const nowIso = new Date().toISOString();
+      const finalImage = invoiceImagePreview || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800';
+      const activeDriverName = orderForInvoice.driverName || selectedDriver?.name || currentUser?.name || 'كابتن التوصيل';
+      const activeDriverId = orderForInvoice.driverId || selectedDriver?.id || currentUser?.id || 'drv-gen';
+
+      // 1. Update Order document with invoice photo details and change status to delivering
+      await onUpdateOrderStatus(orderForInvoice.id, 'delivering', {
+        invoiceNumber: invoiceInput.trim() || `INV-${orderForInvoice.orderNumber || orderForInvoice.id.slice(0, 6)}`,
+        invoiceImageUrl: finalImage,
+        invoiceUploadTime: nowIso,
+        invoiceDriverId: activeDriverId,
+        invoiceDriverName: activeDriverName,
+        receivedByDriverAt: nowIso
+      });
+
+      // 2. Save record in driver_invoices Firestore collection
+      try {
+        await addDoc(collection(db, 'driver_invoices'), {
+          orderId: orderForInvoice.id,
+          orderNumber: orderForInvoice.orderNumber || orderForInvoice.id,
+          orderType: 'regular',
+          driverId: activeDriverId,
+          driverName: activeDriverName,
+          driverPhone: orderForInvoice.driverPhone || selectedDriver?.phone || '',
+          customerName: orderForInvoice.customerName,
+          storeName: orderForInvoice.storeName || 'المتجر',
+          imageUrl: finalImage,
+          uploadedAt: nowIso,
+          amount: orderForInvoice.total || orderForInvoice.totalPrice || 0,
+          notes: invoiceInput.trim(),
+          createdAt: nowIso
+        });
+      } catch (errDb) {
+        console.warn('Could not save to driver_invoices collection:', errDb);
+      }
+
+      setIsInvoiceModalOpen(false);
+      setOrderForInvoice(null);
+      setInvoiceInput('');
+      setInvoiceImagePreview(null);
+    } catch (err) {
+      console.error('Failed saving invoice image:', err);
+    } finally {
+      setIsSubmittingInvoice(false);
+    }
+  };
+
+  // Handler for manual new order submit
   const handleCreateNewOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustomerName.trim() || !newItemName.trim()) return;
@@ -154,9 +380,6 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           customerPhone: newCustomerPhone.trim(),
           storeId,
           storeName,
-          total: totalCalc,
-          deliveryFee: 400,
-          status: 'new',
           itemsCount: newItemQty,
           items: [
             {
@@ -165,19 +388,19 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               quantity: newItemQty
             }
           ],
-          deliveryType: 'delivery',
-          paymentMethod: 'cash',
-          paymentStatus: 'pending',
-          address: newAddress.trim(),
-          notes: newNotes.trim(),
-          createdAt: new Date().toISOString()
+          total: totalCalc,
+          deliveryFee: 400,
+          status: 'new',
+          address: newAddress,
+          notes: newNotes
         });
       }
       setIsNewOrderModalOpen(false);
       setNewCustomerName('');
       setNewItemName('');
+      setNewNotes('');
     } catch (err) {
-      console.error('Error creating order:', err);
+      console.error('Failed creating order:', err);
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -185,451 +408,998 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Action */}
-      <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 shrink-0">
-            <ShoppingBag className="w-7 h-7" />
+      {/* Top Header & Mode Switcher */}
+      <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+            <ShoppingBag className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-900">إدارة الطلبات المباشرة والحية</h2>
-              <span className="text-[11px] bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>تزامن Firestore فوري</span>
+              <h2 className="text-xl font-bold text-slate-900">قسم إدارة وقبول الطلبات وتوزيع المندوبين</h2>
+              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                ربط مباشر Firestore ⚡
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              عرض الطلبات، تتبع المراحل، وتعديل حالة الطلب لحظة بلحظة لكل مستخدم مخول.
+              استقبال الطلبات الجديدة، التواصل مع العملاء، قبول وإسناد المندوبين، ومتابعة إدخال الفواتير والتوصيل.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* View Mode Switcher (Admin vs Driver App) */}
+        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
+          <button
+            onClick={() => setActiveViewMode('admin')}
+            className={`flex-1 md:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              activeViewMode === 'admin'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>لوحة إدارة الطلبات (الإدارة)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveViewMode('driver')}
+            className={`flex-1 md:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+              activeViewMode === 'driver'
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-purple-700'
+            }`}
+          >
+            <Smartphone className="w-4 h-4" />
+            <span>تطبيق المندوب / واجهة الكابتن 📱</span>
+          </button>
+
           {canEditOrders && (
             <button
-              onClick={() => {
-                setNewStoreId(safeStores[0]?.id || '');
-                setIsNewOrderModalOpen(true);
-              }}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs flex items-center gap-2 transition-all active:scale-98"
+              onClick={() => setIsNewOrderModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0"
             >
               <Plus className="w-4 h-4" />
-              <span>إضافة طلب تجريبي جديد</span>
-            </button>
-          )}
-
-          {safeOrders.length === 0 && onSeedOrders && (
-            <button
-              onClick={onSeedOrders}
-              className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>توليد طلبات نموذجية</span>
+              <span>طلب جديد</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Permission Warning Banner if Read-Only */}
-      {!canEditOrders && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-center gap-3 text-xs text-amber-800">
-          <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0" />
-          <div>
-            <span className="font-bold">وضع العرض فقط: </span>
-            <span>حسابك الحالي لا يملك صلاحية تعديل حالة الطلبات. يمكنك فقط استعراض الطلبات والتفاصيل.</span>
-          </div>
-        </div>
-      )}
-
-      {/* Status Stats Metric Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-        <button
-          onClick={() => setSelectedStatusTab('new')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'new'
-              ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-400/20'
-              : 'bg-white border-gray-200 hover:border-amber-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-amber-700 mb-1">
-            <span className="text-xs font-bold">جديدة</span>
-            <Clock className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-amber-900 font-sans">{counts.new}</span>
-        </button>
-
-        <button
-          onClick={() => setSelectedStatusTab('preparing')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'preparing'
-              ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-400/20'
-              : 'bg-white border-gray-200 hover:border-blue-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-blue-700 mb-1">
-            <span className="text-xs font-bold">قيد التحضير</span>
-            <Utensils className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-blue-900 font-sans">{counts.preparing}</span>
-        </button>
-
-        <button
-          onClick={() => setSelectedStatusTab('delivering')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'delivering'
-              ? 'bg-purple-50 border-purple-400 ring-2 ring-purple-400/20'
-              : 'bg-white border-gray-200 hover:border-purple-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-purple-700 mb-1">
-            <span className="text-xs font-bold">قيد التوصيل</span>
-            <Truck className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-purple-900 font-sans">{counts.delivering}</span>
-        </button>
-
-        <button
-          onClick={() => setSelectedStatusTab('delivered')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'delivered'
-              ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-400/20'
-              : 'bg-white border-gray-200 hover:border-emerald-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-emerald-700 mb-1">
-            <span className="text-xs font-bold font-sans">مكتملة</span>
-            <CheckCircle2 className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-emerald-900 font-sans">{counts.delivered}</span>
-        </button>
-
-        <button
-          onClick={() => setSelectedStatusTab('cancelled')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'cancelled'
-              ? 'bg-red-50 border-red-400 ring-2 ring-red-400/20'
-              : 'bg-white border-gray-200 hover:border-red-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-red-700 mb-1">
-            <span className="text-xs font-bold">ملغاة</span>
-            <XCircle className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-red-900 font-sans">{counts.cancelled}</span>
-        </button>
-
-        <button
-          onClick={() => setSelectedStatusTab('returned')}
-          className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
-            selectedStatusTab === 'returned'
-              ? 'bg-slate-100 border-slate-400 ring-2 ring-slate-400/20'
-              : 'bg-white border-gray-200 hover:border-slate-300'
-          }`}
-        >
-          <div className="flex items-center justify-between text-slate-700 mb-1">
-            <span className="text-xs font-bold">مرجعة</span>
-            <RotateCcw className="w-4 h-4" />
-          </div>
-          <span className="text-2xl font-extrabold text-slate-900 font-sans">{counts.returned}</span>
-        </button>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs space-y-3">
-        {/* Status Tab Navigation */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-gray-100 custom-scrollbar">
-          {[
-            { id: 'all', label: `جميع الطلبات (${counts.all})` },
-            { id: 'new', label: `الجديدة (${counts.new})` },
-            { id: 'preparing', label: `قيد التحضير (${counts.preparing})` },
-            { id: 'delivering', label: `قيد التوصيل (${counts.delivering})` },
-            { id: 'delivered', label: `المكتملة (${counts.delivered})` },
-            { id: 'cancelled', label: `الملغاة (${counts.cancelled})` },
-            { id: 'returned', label: `المرجعة (${counts.returned})` }
-          ].map(tab => (
+      {/* ==================== VIEW MODE 1: ADMIN MANAGEMENT ==================== */}
+      {activeViewMode === 'admin' && (
+        <>
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <button
-              key={tab.id}
-              onClick={() => setSelectedStatusTab(tab.id)}
-              className={`text-xs font-bold px-3.5 py-2 rounded-xl shrink-0 transition-all ${
-                selectedStatusTab === tab.id
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-gray-50 text-slate-600 hover:bg-gray-100'
+              onClick={() => setSelectedStatusTab('all')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'all'
+                  ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/20'
+                  : 'bg-white border-gray-200 hover:border-slate-300'
               }`}
             >
-              {tab.label}
+              <div className="flex items-center justify-between text-xs font-bold mb-1 opacity-80">
+                <span>الكل</span>
+                <ShoppingBag className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold font-sans">{counts.all}</span>
             </button>
-          ))}
-        </div>
 
-        <div className="flex flex-col md:flex-row items-center gap-3">
-          {/* Search Field */}
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="ابحث برقم الطلب، اسم العميل، رقم الهاتف، اسم المتجر أو الصنف..."
-              className="w-full pr-10 pl-4 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50"
-            />
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm('')}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
-              >
-                مسح
-              </button>
+            <button
+              onClick={() => setSelectedStatusTab('new')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'new'
+                  ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-400/20'
+                  : 'bg-white border-gray-200 hover:border-amber-300'
+              }`}
+            >
+              <div className="flex items-center justify-between text-amber-700 mb-1">
+                <span className="text-xs font-bold">جديدة (بانتظار التأكيد)</span>
+                <Clock className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold text-amber-900 font-sans">{counts.new}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedStatusTab('preparing')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'preparing'
+                  ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-400/20'
+                  : 'bg-white border-gray-200 hover:border-blue-300'
+              }`}
+            >
+              <div className="flex items-center justify-between text-blue-700 mb-1">
+                <span className="text-xs font-bold">قيد التحضير (محدد مندوب)</span>
+                <Utensils className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold text-blue-900 font-sans">{counts.preparing}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedStatusTab('delivering')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'delivering'
+                  ? 'bg-purple-50 border-purple-400 ring-2 ring-purple-400/20'
+                  : 'bg-white border-gray-200 hover:border-purple-300'
+              }`}
+            >
+              <div className="flex items-center justify-between text-purple-700 mb-1">
+                <span className="text-xs font-bold">قيد التوصيل</span>
+                <Truck className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold text-purple-900 font-sans">{counts.delivering}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedStatusTab('delivered')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'delivered'
+                  ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-400/20'
+                  : 'bg-white border-gray-200 hover:border-emerald-300'
+              }`}
+            >
+              <div className="flex items-center justify-between text-emerald-700 mb-1">
+                <span className="text-xs font-bold">مكتملة</span>
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold text-emerald-900 font-sans">{counts.delivered}</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedStatusTab('cancelled')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'cancelled'
+                  ? 'bg-red-50 border-red-400 ring-2 ring-red-400/20'
+                  : 'bg-white border-gray-200 hover:border-red-300'
+              }`}
+            >
+              <div className="flex items-center justify-between text-red-700 mb-1">
+                <span className="text-xs font-bold">ملغاة عبر الإدارة</span>
+                <XCircle className="w-4 h-4" />
+              </div>
+              <span className="text-2xl font-extrabold text-red-900 font-sans">{counts.cancelled}</span>
+            </button>
+          </div>
+
+          {/* Filter and Search Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs space-y-3">
+            {/* Status Tab Navigation */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-gray-100 custom-scrollbar">
+              {[
+                { id: 'all', label: `جميع الطلبات (${counts.all})` },
+                { id: 'new', label: `الجديدة (${counts.new})` },
+                { id: 'preparing', label: `قيد التحضير (${counts.preparing})` },
+                { id: 'delivering', label: `قيد التوصيل (${counts.delivering})` },
+                { id: 'delivered', label: `المكتملة (${counts.delivered})` },
+                { id: 'cancelled', label: `الملغاة (${counts.cancelled})` },
+                { id: 'returned', label: `المرجعة (${counts.returned})` }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSelectedStatusTab(tab.id)}
+                  className={`text-xs font-bold px-3.5 py-2 rounded-xl shrink-0 transition-all ${
+                    selectedStatusTab === tab.id
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-gray-50 text-slate-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-col md:flex-row items-center gap-3">
+              {/* Search Field */}
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="ابحث برقم الطلب، اسم العميل، رقم الهاتف، اسم المتجر، المندوب، أو الصنف..."
+                  className="w-full pr-10 pl-4 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50"
+                />
+                {searchTerm && (
+                  <button 
+                    onClick={() => setSearchTerm('')}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    مسح
+                  </button>
+                )}
+              </div>
+
+              {/* Store Filter */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={selectedStoreId}
+                  onChange={(e) => setSelectedStoreId(e.target.value)}
+                  className="w-full md:w-56 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">جميع المتاجر والمطاعم</option>
+                  {safeStores.map(st => (
+                    <option key={st.id} value={st.id}>{st.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Orders List Grid */}
+          {isLoading ? (
+            <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
+              <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+              <p className="text-xs font-bold text-slate-600">جاري تحميل وتحديث الطلبات مباشرة من Firestore...</p>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
+              <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto" />
+              <h3 className="text-base font-bold text-slate-800">لا توجد طلبات تطابق معايير البحث الحالية</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                قم بتغيير كلمة البحث أو الفلتر المستهدف لاستعراض بقية الطلبات المسجلة.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredOrders.map((order) => {
+                const rawStatus = order.status;
+                const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
+                const StatusIcon = statusConfig.Icon;
+
+                return (
+                  <div 
+                    key={order.id}
+                    className={`bg-white rounded-2xl border ${statusConfig.borderColor} shadow-xs hover:shadow-md transition-all overflow-hidden flex flex-col justify-between`}
+                  >
+                    {/* Card Header */}
+                    <div className="p-4 bg-slate-50/60 border-b border-gray-100 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-mono font-extrabold text-sm text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                          {order.orderNumber || `#${order.id.slice(0, 6)}`}
+                        </span>
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 block">
+                            {order.storeName || 'متجر عام'}
+                          </span>
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
+                            <Calendar className="w-3 h-3 text-slate-400" />
+                            {order.createdAt ? new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status Dropdown */}
+                      <div className="relative">
+                        {canEditOrders ? (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={rawStatus}
+                              disabled={updatingOrderId === order.id}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
+                              className={`text-xs font-bold px-3 py-1.5 rounded-xl border cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs transition-all ${statusConfig.badgeClass}`}
+                            >
+                              <option value="new">🟡 جديد (بانتظار التأكيد)</option>
+                              <option value="preparing">🔵 قيد التحضير (تحديد مندوب)</option>
+                              <option value="delivering">🟣 قيد التوصيل</option>
+                              <option value="delivered">🟢 مكتمل / تم التسليم</option>
+                              {canCancelOrders && <option value="cancelled">🔴 إلغاء عبر الإدارة</option>}
+                              <option value="returned">⚪ تم الإرجاع</option>
+                            </select>
+                            {updatingOrderId === order.id && (
+                              <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
+                            )}
+                          </div>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border ${statusConfig.badgeClass}`}>
+                            <StatusIcon className="w-3.5 h-3.5" />
+                            <span>{statusConfig.label}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Body Details */}
+                    <div className="p-4 space-y-3 flex-1">
+                      {/* Customer & Phone with Admin Call Action */}
+                      <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-slate-400" />
+                          <span className="font-bold text-slate-900">{order.customerName}</span>
+                        </div>
+                        {order.customerPhone && (
+                          <a 
+                            href={`tel:${order.customerPhone}`}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 dir-ltr transition-colors border border-blue-200"
+                            title="التواصل مع العميل لتأكيد الطلب"
+                          >
+                            <Phone className="w-3 h-3 text-blue-600" />
+                            <span>{order.customerPhone}</span>
+                            <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans">تأكيد 📞</span>
+                          </a>
+                        )}
+                      </div>
+
+                      {/* Driver & Invoice Info Badge */}
+                      <div className="bg-purple-50/70 p-2.5 rounded-xl border border-purple-200 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-purple-900 flex items-center gap-1">
+                            <Truck className="w-3.5 h-3.5 text-purple-700" />
+                            <span>المندوب المسند:</span>
+                          </span>
+                          {order.driverName ? (
+                            <span className="font-bold text-purple-950 bg-white px-2 py-0.5 rounded border border-purple-200">
+                              {order.driverName} ({order.driverPhone || 'بدون هاتف'})
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setOrderToAssign(order);
+                                setIsAssignDriverModalOpen(true);
+                              }}
+                              className="text-[11px] bg-purple-600 hover:bg-purple-700 text-white font-bold px-2.5 py-1 rounded-lg transition-all"
+                            >
+                              + اختيار كابتن توصيل
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Invoice Number Status */}
+                        <div className="flex items-center justify-between border-t border-purple-200/60 pt-1.5 text-[11px]">
+                          <span className="font-bold text-slate-700 flex items-center gap-1">
+                            <Receipt className="w-3.5 h-3.5 text-slate-500" />
+                            <span>رقم الفاتورة المسجل:</span>
+                          </span>
+                          {order.invoiceNumber ? (
+                            <span className="font-mono font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                              {order.invoiceNumber} ✅
+                            </span>
+                          ) : (
+                            <span className="text-amber-800 bg-amber-100 px-2 py-0.5 rounded font-bold border border-amber-200">
+                              بانتظار إدخال الكابتن للفاتورة ⏳
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Items List Summary */}
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 block">الأصناف المطلوبة ({order.itemsCount || order.items?.length || 1}):</span>
+                        {order.items && order.items.length > 0 ? (
+                          <div className="space-y-1 bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
+                            {order.items.map((it, idx) => (
+                              <div key={idx} className="flex items-center justify-between text-xs text-slate-700">
+                                <span className="font-medium">
+                                  <span className="font-bold text-blue-600 ml-1">{it.quantity}x</span>
+                                  {it.productName}
+                                  {it.options && it.options.length > 0 && (
+                                    <span className="text-[10px] text-slate-400 mr-1">({it.options.join(', ')})</span>
+                                  )}
+                                </span>
+                                <span className="font-bold font-mono text-slate-800">{(it.price * it.quantity).toLocaleString()} ر.ي</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-slate-600 font-medium bg-gray-50 p-2 rounded-lg">
+                            طلب منتجات من {order.storeName || 'المتجر'} (إجمالي: {order.total?.toLocaleString()} ر.ي)
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Address */}
+                      {order.address && (
+                        <div className="flex items-start gap-1.5 text-xs text-slate-600">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                          <span className="line-clamp-1">{order.address}</span>
+                        </div>
+                      )}
+
+                      {/* Cancellation Policy Badge */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] flex items-center justify-between">
+                        <span className="font-bold text-slate-700">صلاحية الإلغاء:</span>
+                        <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded font-bold border border-amber-200 flex items-center gap-1">
+                          <ShieldAlert className="w-3 h-3 text-amber-600" />
+                          <span>عبر الإدارة فقط بالتواصل مع العميل</span>
+                        </span>
+                      </div>
+
+                      {/* Admin Workflow Actions */}
+                      {canEditOrders && (
+                        <div className="pt-1 flex flex-wrap gap-1.5">
+                          {rawStatus === 'new' && (
+                            <button
+                              onClick={() => {
+                                setOrderToAssign(order);
+                                setIsAssignDriverModalOpen(true);
+                              }}
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                            >
+                              <Utensils className="w-3.5 h-3.5" />
+                              <span>تأكيد القبول واختيار المندوب (قيد التحضير) 👨‍🍳</span>
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => {
+                              setOrderToAssign(order);
+                              setIsAssignDriverModalOpen(true);
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-2 px-2.5 rounded-xl transition-all flex items-center justify-center gap-1 border border-slate-300 cursor-pointer"
+                            title="تغيير المندوب المسند"
+                          >
+                            <Truck className="w-3.5 h-3.5 text-slate-600" />
+                            <span>تغيير الكابتن</span>
+                          </button>
+
+                          {rawStatus === 'new' && canCancelOrders && (
+                            <button
+                              onClick={() => handleStatusChange(order.id, 'cancelled')}
+                              className="bg-red-50 hover:bg-red-100 text-red-700 font-bold text-[11px] py-2 px-2.5 rounded-xl border border-red-200 cursor-pointer"
+                              title="إلغاء الطلب من الإدارة"
+                            >
+                              إلغاء الطلب
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {order.notes && (
+                        <div className="text-[11px] bg-amber-50/80 border border-amber-200 text-amber-900 p-2 rounded-lg font-medium">
+                          ملاحظة العميل: {order.notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Footer */}
+                    <div className="p-3.5 bg-gray-50/90 border-t border-gray-100 flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">الإجمالي الكلي:</span>
+                        <span className="text-base font-extrabold text-slate-900 font-sans">
+                          {order.total?.toLocaleString()} <span className="text-xs font-normal text-slate-500">ر.ي</span>
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => setViewingOrder(order)}
+                        className="bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-gray-200 text-xs font-bold px-3 py-1.5 rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>عرض التفاصيل والسند</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ==================== VIEW MODE 2: DRIVER APP INTERFACE ==================== */}
+      {activeViewMode === 'driver' && (
+        <div className="space-y-5">
+          {/* Captain Selector Header */}
+          <div className="bg-gradient-to-r from-purple-900 to-slate-900 p-5 rounded-2xl text-white shadow-md space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-purple-600/80 border-2 border-purple-400 flex items-center justify-center font-bold text-xl">
+                  🚚
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>واجهة تطبيقات الكباتن والمندوبين</span>
+                    <span className="bg-purple-500/40 text-purple-200 text-[10px] px-2 py-0.5 rounded-full border border-purple-400">
+                      محاكاة حية
+                    </span>
+                  </h3>
+                  <p className="text-xs text-purple-200 mt-0.5">
+                    اختر حساب المندوب لمتابعة الطلبات الموكلة له، إدخال رقم الفاتورة، وتحديث حالة التوصيل.
+                  </p>
+                </div>
+              </div>
+
+              {/* Driver Select */}
+              <div className="w-full sm:w-auto">
+                <label className="text-[11px] font-bold text-purple-300 block mb-1">حدد حساب المندوب الحالي:</label>
+                <select
+                  value={selectedDriverId}
+                  onChange={(e) => setSelectedDriverId(e.target.value)}
+                  className="w-full sm:w-64 px-3 py-2 rounded-xl border border-purple-400 bg-slate-800 text-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+                >
+                  {drivers.map(drv => (
+                    <option key={drv.id} value={drv.id}>
+                      {drv.name} ({drv.phone}) - {drv.vehicleType || 'دراجة'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Selected Captain Banner Details */}
+            {selectedDriver && (
+              <div className="bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-amber-300">الكابتن الحالي:</span>
+                  <strong className="text-white">{selectedDriver.name}</strong>
+                  <span className="text-slate-300 font-mono">({selectedDriver.phone})</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span>المركبة: <strong className="text-amber-200">{selectedDriver.vehicleType} - {selectedDriver.plateNumber || 'بدون لوحة'}</strong></span>
+                  <span className="bg-emerald-500/30 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-400 font-bold">
+                    عدد الطلبات المسندة: {driverAssignedOrders.length}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Store Filter */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
-              value={selectedStoreId}
-              onChange={(e) => setSelectedStoreId(e.target.value)}
-              className="w-full md:w-56 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">جميع المتاجر والمطاعم</option>
-              {safeStores.map(st => (
-                <option key={st.id} value={st.id}>{st.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
+          {/* Assigned Orders for Selected Driver */}
+          {driverAssignedOrders.length === 0 ? (
+            <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
+              <Truck className="w-12 h-12 text-slate-300 mx-auto" />
+              <h3 className="text-base font-bold text-slate-800">لا توجد طلبات مسندة حالياً للكابتن ({selectedDriver?.name})</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                قم بالانتقال لوجهة إدارة الطلبات وتعيين هذا الكابتن لأحد الطلبات الجديدة لتظهر هنا فوراً.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-purple-600" />
+                <span>الطلبات الموكلة للكابتن {selectedDriver?.name} ({driverAssignedOrders.length}):</span>
+              </h3>
 
-      {/* Orders List */}
-      {isLoading ? (
-        <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
-          <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-          <p className="text-xs font-bold text-slate-600">جاري تحميل وتحديث الطلبات مباشرة من Firestore...</p>
-        </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
-          <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto" />
-          <h3 className="text-base font-bold text-slate-800">لا توجد طلبات تطابق معايير البحث الحالية</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            قم بتغيير كلمة البحث أو الفلتر المستهدف لاستعراض بقية الطلبات المسجلة.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredOrders.map((order) => {
-            const rawStatus = order.status;
-            const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
-            const StatusIcon = statusConfig.Icon;
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {driverAssignedOrders.map((order) => {
+                  const statusConfig = ORDER_STATUS_CONFIG[order.status] || ORDER_STATUS_CONFIG.new;
+                  const isInvoiceProvided = !!order.invoiceNumber && order.invoiceNumber.trim().length > 0;
+                  const canDeliver = isInvoiceProvided;
 
-            return (
-              <div 
-                key={order.id}
-                className={`bg-white rounded-2xl border ${statusConfig.borderColor} shadow-xs hover:shadow-md transition-all overflow-hidden flex flex-col justify-between`}
-              >
-                {/* Card Header */}
-                <div className="p-4 bg-slate-50/60 border-b border-gray-100 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono font-extrabold text-sm text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-                      {order.orderNumber || `#${order.id.slice(0, 6)}`}
-                    </span>
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">
-                        {order.storeName || 'متجر عام'}
-                      </span>
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        {order.createdAt ? new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
-                      </span>
-                    </div>
-                  </div>
+                  return (
+                    <div 
+                      key={order.id}
+                      className="bg-white rounded-2xl border border-purple-200 shadow-md overflow-hidden flex flex-col justify-between"
+                    >
+                      {/* Driver Order Header */}
+                      <div className="p-4 bg-purple-900 text-white flex items-center justify-between">
+                        <div>
+                          <span className="font-mono font-extrabold text-sm text-amber-300 bg-white/10 px-2.5 py-1 rounded-lg border border-white/20">
+                            {order.orderNumber || `#${order.id.slice(0, 6)}`}
+                          </span>
+                          <span className="text-xs text-purple-200 mr-2 font-bold">{order.storeName}</span>
+                        </div>
 
-                  {/* Dynamic Status Changer Dropdown */}
-                  <div className="relative">
-                    {canEditOrders ? (
-                      <div className="flex items-center gap-1.5">
-                        <select
-                          value={rawStatus}
-                          disabled={updatingOrderId === order.id}
-                          onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                          className={`text-xs font-bold px-3 py-1.5 rounded-xl border cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs transition-all ${statusConfig.badgeClass}`}
-                        >
-                          <option value="new">🟡 جديد (جديد)</option>
-                          <option value="preparing">🔵 قيد التحضير</option>
-                          <option value="delivering">🟣 قيد التوصيل</option>
-                          <option value="delivered">🟢 مكتمل / تم التسليم</option>
-                          <option value="cancelled">🔴 تم الإلغاء</option>
-                          <option value="returned">⚪ تم الإرجاع</option>
-                        </select>
-                        {updatingOrderId === order.id && (
-                          <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
-                        )}
+                        <span className={`text-xs font-bold px-3 py-1 rounded-full border ${statusConfig.badgeClass}`}>
+                          {statusConfig.label}
+                        </span>
                       </div>
-                    ) : (
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border ${statusConfig.badgeClass}`}>
-                        <StatusIcon className="w-3.5 h-3.5" />
-                        <span>{statusConfig.label}</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
 
-                {/* Card Body Details */}
-                <div className="p-4 space-y-3 flex-1">
-                  {/* Customer & Phone */}
-                  <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-slate-400" />
-                      <span className="font-bold text-slate-900">{order.customerName}</span>
-                    </div>
-                    {order.customerPhone && (
-                      <a 
-                        href={`tel:${order.customerPhone}`}
-                        className="text-blue-600 hover:text-blue-700 font-mono font-bold flex items-center gap-1 dir-ltr"
-                      >
-                        <Phone className="w-3 h-3 text-blue-500" />
-                        <span>{order.customerPhone}</span>
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Items List Summary */}
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-400 block">الأصناف المطلوبة ({order.itemsCount || order.items?.length || 1}):</span>
-                    {order.items && order.items.length > 0 ? (
-                      <div className="space-y-1 bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
-                        {order.items.map((it, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-xs text-slate-700">
-                            <span className="font-medium">
-                              <span className="font-bold text-blue-600 ml-1">{it.quantity}x</span>
-                              {it.productName}
-                              {it.options && it.options.length > 0 && (
-                                <span className="text-[10px] text-slate-400 mr-1">({it.options.join(', ')})</span>
-                              )}
-                            </span>
-                            <span className="font-bold font-mono text-slate-800">{(it.price * it.quantity).toLocaleString()} ر.ي</span>
+                      {/* Driver Order Details */}
+                      <div className="p-4 space-y-3 flex-1 text-xs">
+                        {/* Customer Info & Phone */}
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-900 text-sm">{order.customerName}</span>
+                            <a 
+                              href={`tel:${order.customerPhone}`}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold px-3 py-1 rounded-lg flex items-center gap-1 dir-ltr text-xs shadow-xs"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>{order.customerPhone}</span>
+                            </a>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-600 font-medium bg-gray-50 p-2 rounded-lg">
-                        طلب منتجات من {order.storeName || 'المتجر'} (إجمالي: {order.total?.toLocaleString()} ر.ي)
-                      </div>
-                    )}
-                  </div>
+                          <p className="text-slate-600 font-medium flex items-center gap-1 pt-1 border-t border-slate-200/60">
+                            <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                            <span>{order.address || 'عنوان العميل غير محدد'}</span>
+                          </p>
+                        </div>
 
-                  {/* Address & Delivery note */}
-                  {order.address && (
-                    <div className="flex items-start gap-1.5 text-xs text-slate-600">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                      <span className="line-clamp-1">{order.address}</span>
-                    </div>
-                  )}
+                        {/* Order Items Breakdown */}
+                        <div className="space-y-1">
+                          <span className="font-bold text-slate-700 block">تفاصيل الأصناف ({order.itemsCount || order.items?.length || 1}):</span>
+                          <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 space-y-1">
+                            {order.items && order.items.length > 0 ? (
+                              order.items.map((it, idx) => (
+                                <div key={idx} className="flex justify-between font-medium text-slate-800">
+                                  <span><strong className="text-purple-600 ml-1">{it.quantity}x</strong> {it.productName}</span>
+                                  <span className="font-mono font-bold">{(it.price * it.quantity).toLocaleString()} ر.ي</span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-slate-500">طلب عام بقيمة {order.total?.toLocaleString()} ر.ي</p>
+                            )}
+                          </div>
+                        </div>
 
-                  {/* Cancellation & Return Policy Rules Badge */}
-                  {(() => {
-                    const storeObj = safeStores.find(s => s.id === order.storeId || s.name === order.storeName);
-                    const isReturnAllowed = storeObj?.allowReturns !== false;
-                    const canUserCancel = rawStatus === 'new';
-
-                    return (
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-700">حق الإلغاء للعميل:</span>
-                          {canUserCancel ? (
-                            <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold border border-emerald-200">
-                              متاح (الطلب جديد) ✅
+                        {/* Invoice Enforcement Requirement Banner */}
+                        <div className={`p-3 rounded-xl border space-y-1.5 transition-all ${
+                          isInvoiceProvided 
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900' 
+                            : 'bg-amber-50 border-amber-300 text-amber-900'
+                        }`}>
+                          <div className="flex items-center justify-between font-bold">
+                            <span className="flex items-center gap-1.5">
+                              <Receipt className="w-4 h-4 text-purple-700" />
+                              <span>رقم الفاتورة:</span>
                             </span>
-                          ) : (
-                            <span className="text-red-700 bg-red-50 px-2 py-0.5 rounded font-bold border border-red-200">
-                              غير متاح (قيد المعالجة/التوصيل) 🚫
-                            </span>
+                            {isInvoiceProvided ? (
+                              <span className="font-mono text-sm bg-white px-2.5 py-0.5 rounded border border-emerald-300 font-extrabold text-emerald-800">
+                                {order.invoiceNumber} ✅
+                              </span>
+                            ) : (
+                              <span className="text-xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">
+                                يلزم إدخال رقم الفاتورة أولاً ⚠️
+                              </span>
+                            )}
+                          </div>
+
+                          {!isInvoiceProvided && (
+                            <p className="text-[11px] text-amber-800 font-medium">
+                              ⚠️ تنبيه المندوب: لا يمكنك تحويل حالة الطلب إلى (قيد التوصيل) حتى تقوم باستلام الشحنة وتدوين رقم الفاتورة أدناه.
+                            </p>
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between border-t border-slate-200/60 pt-1">
-                          <span className="font-bold text-slate-700">سياسة إرجاع المتجر:</span>
-                          {isReturnAllowed ? (
-                            <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-bold border border-blue-200">
-                              مسموح بالإرجاع 🔄
-                            </span>
-                          ) : (
-                            <span className="text-slate-600 bg-gray-100 px-2 py-0.5 rounded font-bold border border-gray-200">
-                              غير قابل للإرجاع 🚫
-                            </span>
-                          )}
+                        {/* Total price */}
+                        <div className="flex items-center justify-between bg-purple-50 p-2.5 rounded-xl border border-purple-200 font-bold">
+                          <span className="text-purple-900">المبلغ المطلوب تحصيله:</span>
+                          <span className="text-purple-950 font-mono text-base">{order.total?.toLocaleString()} ر.ي</span>
                         </div>
                       </div>
-                    );
-                  })()}
 
-                  {/* Driver Workflow Action Shortcuts */}
-                  {canEditOrders && (
-                    <div className="pt-1 flex flex-wrap gap-1.5">
-                      {rawStatus === 'new' && (
-                        <button
-                          onClick={() => handleStatusChange(order.id, 'preparing')}
-                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                        >
-                          <Utensils className="w-3.5 h-3.5" />
-                          <span>قبول وتغيير إلى قيد التحضير 👨‍🍳</span>
-                        </button>
-                      )}
+                      {/* Driver Action Workflow Controls */}
+                      <div className="p-3.5 bg-gray-50 border-t border-gray-200 space-y-2">
+                        {/* Step 1: Input Invoice Number */}
+                        {!isInvoiceProvided ? (
+                          <button
+                            onClick={() => {
+                              setOrderForInvoice(order);
+                              setInvoiceInput(order.invoiceNumber || '');
+                              setIsInvoiceModalOpen(true);
+                            }}
+                            className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                          >
+                            <Receipt className="w-4 h-4" />
+                            <span>استلام الطلب وإدخال رقم الفاتورة 📦</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-between bg-emerald-100 text-emerald-900 px-3 py-1.5 rounded-xl border border-emerald-300 text-xs font-bold">
+                            <span className="flex items-center gap-1">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                              <span>تم استلام الطلب وتوثيق الفاتورة</span>
+                            </span>
+                            <button
+                              onClick={() => {
+                                setOrderForInvoice(order);
+                                setInvoiceInput(order.invoiceNumber || '');
+                                setIsInvoiceModalOpen(true);
+                              }}
+                              className="text-[10px] text-emerald-800 underline hover:text-emerald-950"
+                            >
+                              تعديل رقم الفاتورة
+                            </button>
+                          </div>
+                        )}
 
-                      {rawStatus === 'preparing' && (
-                        <button
-                          onClick={() => handleStatusChange(order.id, 'delivering')}
-                          className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                        >
-                          <Truck className="w-3.5 h-3.5" />
-                          <span>بدء التوصيل (قيد التوصيل) 🚗</span>
-                        </button>
-                      )}
+                        {/* Step 2: Transition Status to "Delivering" or "Delivered" */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* Delivering Button */}
+                          <button
+                            disabled={!canDeliver || order.status === 'delivering' || order.status === 'delivered'}
+                            onClick={async () => {
+                              try {
+                                setUpdatingOrderId(order.id);
+                                await onUpdateOrderStatus(order.id, 'delivering');
+                              } finally {
+                                setUpdatingOrderId(null);
+                              }
+                            }}
+                            className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                              canDeliver && order.status !== 'delivering' && order.status !== 'delivered'
+                                ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs cursor-pointer'
+                                : order.status === 'delivering'
+                                ? 'bg-purple-100 text-purple-900 border border-purple-300 font-extrabold'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300'
+                            }`}
+                            title={!canDeliver ? 'يلزم استلام الطلب وإدخال رقم الفاتورة أولاً' : ''}
+                          >
+                            <Truck className="w-4 h-4" />
+                            <span>
+                              {order.status === 'delivering' 
+                                ? 'قيد التوصيل الآن 🚗' 
+                                : !canDeliver 
+                                ? '🔒 قيد التوصيل (مغلق)' 
+                                : 'بدء التوصيل (قيد التوصيل)'}
+                            </span>
+                          </button>
 
-                      {rawStatus === 'delivering' && (
-                        <button
-                          onClick={() => {
-                            alert(`📍 تم إرسال إشعار فوري للعميل (${order.customerName}): "مندوب التوصيل وصل إلى موقعك المحدد! 📍 يرجى الخروج لاستلام الطلب"`);
-                          }}
-                          className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[11px] py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                        >
-                          <MapPin className="w-3.5 h-3.5" />
-                          <span>📍 إرسال: تم الوصول للموقع</span>
-                        </button>
-                      )}
+                          {/* Completed Delivered Button */}
+                          <button
+                            disabled={order.status !== 'delivering'}
+                            onClick={async () => {
+                              try {
+                                setUpdatingOrderId(order.id);
+                                await onUpdateOrderStatus(order.id, 'delivered');
+                              } finally {
+                                setUpdatingOrderId(null);
+                              }
+                            }}
+                            className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                              order.status === 'delivering'
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer'
+                                : order.status === 'delivered'
+                                ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 font-extrabold'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>
+                              {order.status === 'delivered' ? 'تم التسليم بنجاح ✅' : 'تأكيد التسليم للعميل'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  )}
-
-                  {order.notes && (
-                    <div className="text-[11px] bg-amber-50/80 border border-amber-200 text-amber-900 p-2 rounded-lg font-medium">
-                      ملاحظة العميل: {order.notes}
-                    </div>
-                  )}
-                </div>
-
-                {/* Card Footer Price & View Modal */}
-                <div className="p-3.5 bg-gray-50/90 border-t border-gray-100 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">الإجمالي الكلي:</span>
-                    <span className="text-base font-extrabold text-slate-900 font-sans">
-                      {order.total?.toLocaleString()} <span className="text-xs font-normal text-slate-500">ر.ي</span>
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={() => setViewingOrder(order)}
-                    className="bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-gray-200 text-xs font-bold px-3 py-1.5 rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>عرض التفاصيل والسند</span>
-                  </button>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Order Details Modal */}
+      {/* ==================== MODAL 1: ASSIGN DRIVER MODAL ==================== */}
+      {isAssignDriverModalOpen && orderToAssign && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Truck className="w-5 h-5 text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold">تأكيد قبول الطلب واختيار الكابتن المندوب</h3>
+                  <p className="text-[11px] text-slate-300">
+                    الطلب {orderToAssign.orderNumber || `#${orderToAssign.id.slice(0, 6)}`} - {orderToAssign.storeName}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsAssignDriverModalOpen(false);
+                  setOrderToAssign(null);
+                }}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {/* Customer Contact Prompt */}
+              <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-amber-900 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold flex items-center gap-1.5 text-sm">
+                    <Phone className="w-4 h-4 text-amber-600" />
+                    <span>التواصل مع العميل لتأكيد الطلب:</span>
+                  </span>
+                  <a 
+                    href={`tel:${orderToAssign.customerPhone}`}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-mono font-bold px-3 py-1 rounded-lg flex items-center gap-1 text-xs"
+                  >
+                    <span>اتصال بالعميل ({orderToAssign.customerPhone})</span>
+                  </a>
+                </div>
+                <p className="text-[11px] text-amber-800">
+                  تواصل مع العميل <strong className="text-slate-900">({orderToAssign.customerName})</strong> لطلب التأكيد النهائي أو استفسار العنوان قبل قبول الطلب وتحويله للمندوب.
+                </p>
+              </div>
+
+              {/* Driver Selection Section */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-xs">اختر أحد المندوبين المسجلين لتسليم الطلب:</label>
+                  <span className="text-[11px] text-slate-400">إجمالي المندوبين ({drivers.length})</span>
+                </div>
+
+                {/* Driver Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input 
+                    type="text"
+                    value={driverSearchTerm}
+                    onChange={(e) => setDriverSearchTerm(e.target.value)}
+                    placeholder="ابحث باسم المندوب أو رقم الهاتف أو المركبة..."
+                    className="w-full pr-9 pl-3 py-1.5 rounded-xl border border-gray-200 text-xs bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Drivers List Grid */}
+                <div className="max-h-60 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                  {drivers
+                    .filter(d => 
+                      !driverSearchTerm.trim() || 
+                      d.name.toLowerCase().includes(driverSearchTerm.toLowerCase()) ||
+                      d.phone.includes(driverSearchTerm) ||
+                      (d.vehicleType && d.vehicleType.includes(driverSearchTerm))
+                    )
+                    .map((driver) => {
+                      const isCurrentlyAssigned = orderToAssign.driverId === driver.id;
+
+                      return (
+                        <div 
+                          key={driver.id}
+                          className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
+                            isCurrentlyAssigned
+                              ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-400/20'
+                              : 'bg-white hover:bg-slate-50 border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-xl bg-slate-900 text-amber-400 font-bold flex items-center justify-center shrink-0">
+                              🚚
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-slate-900 text-xs">{driver.name}</span>
+                                <span className={`w-2 h-2 rounded-full ${driver.isOnline ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-mono">
+                                {driver.phone} • {driver.vehicleType || 'دراجة'} ({driver.plateNumber || 'بدون لوحة'})
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => handleAssignDriverSubmit(driver)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-2xs flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <span>{isCurrentlyAssigned ? 'المندوب الحالي ✅' : 'قبول وتعيين المندوب 🚀'}</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Admin Cancel Option */}
+              {canCancelOrders && (
+                <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">في حال عدم رغبة العميل بالطلب:</span>
+                  <button
+                    onClick={() => {
+                      handleStatusChange(orderToAssign.id, 'cancelled');
+                      setIsAssignDriverModalOpen(false);
+                    }}
+                    className="bg-red-50 hover:bg-red-100 text-red-700 font-bold px-3 py-1.5 rounded-lg text-xs border border-red-200 cursor-pointer"
+                  >
+                    إلغاء الطلب من الإدارة 🔴
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL 2: INVOICE IMAGE UPLOAD MODAL ==================== */}
+      {isInvoiceModalOpen && orderForInvoice && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="p-4 bg-purple-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-amber-300" />
+                <h3 className="text-sm font-bold">📸 رفع صورة الفاتورة للطلب (بدء التوصيل)</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsInvoiceModalOpen(false);
+                  setOrderForInvoice(null);
+                  setInvoiceImagePreview(null);
+                }}
+                className="p-1 text-purple-300 hover:text-white cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveInvoiceSubmit} className="p-5 space-y-4 text-xs">
+              <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-purple-900 space-y-1">
+                <p><span className="text-purple-600 font-bold">الطلب:</span> #{orderForInvoice.orderNumber || orderForInvoice.id.slice(0, 6)} ({orderForInvoice.storeName})</p>
+                <p><span className="text-purple-600 font-bold">العميل:</span> {orderForInvoice.customerName} - {orderForInvoice.customerPhone}</p>
+              </div>
+
+              {/* Image Upload Widget */}
+              <div className="space-y-2">
+                <label className="font-bold text-slate-800 block">
+                  التقط أو ارفع صورة الفاتورة الورقية الصادرة من المتجر:
+                </label>
+
+                {invoiceImagePreview ? (
+                  <div className="relative rounded-xl border-2 border-dashed border-purple-400 p-2 bg-purple-50/50 flex flex-col items-center gap-2">
+                    <img 
+                      src={invoiceImagePreview} 
+                      alt="معاينة الفاتورة" 
+                      className="max-h-48 rounded-lg object-contain border border-purple-200 shadow-xs"
+                    />
+                    <div className="flex items-center gap-2">
+                      <label className="bg-white hover:bg-gray-100 text-purple-700 border border-purple-300 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors">
+                        تغيير الصورة
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          capture="environment"
+                          onChange={handleInvoiceImageChange} 
+                          className="hidden" 
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceImagePreview(null)}
+                        className="bg-rose-50 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer"
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="border-2 border-dashed border-gray-300 hover:border-purple-500 bg-gray-50 hover:bg-purple-50/50 p-6 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center">
+                    <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                    <span className="font-bold text-slate-800 text-xs">اضغط لالتقاط أو اختيار صورة الفاتورة</span>
+                    <span className="text-[10px] text-slate-400">يدعم الصور المباشرة من الكاميرا والمعرض</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      capture="environment"
+                      onChange={handleInvoiceImageChange} 
+                      className="hidden" 
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-800 block mb-1">
+                  ملاحظة أو رقم الفاتورة (اختياري):
+                </label>
+                <input 
+                  type="text" 
+                  value={invoiceInput}
+                  onChange={(e) => setInvoiceInput(e.target.value)}
+                  placeholder="مثال: INV-9821 أو تم دفع القيمة كاش"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-purple-500 bg-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsInvoiceModalOpen(false);
+                    setOrderForInvoice(null);
+                    setInvoiceImagePreview(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-gray-100 font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingInvoice || (!invoiceImagePreview && !invoiceInput.trim())}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2 rounded-xl shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingInvoice ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  <span>رفع الفاتورة وبدء التوصيل 🚀</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL 3: VIEW ORDER DETAILS ==================== */}
       {viewingOrder && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
@@ -665,6 +1435,28 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   <p><span className="text-slate-400">الاسم:</span> <strong className="text-slate-800">{viewingOrder.customerName}</strong></p>
                   <p><span className="text-slate-400">الهاتف:</span> <strong className="text-slate-800 font-mono">{viewingOrder.customerPhone || 'غير مسجل'}</strong></p>
                   <p><span className="text-slate-400">العنوان:</span> <span className="text-slate-700">{viewingOrder.address || 'استلام من المتجر'}</span></p>
+                </div>
+              </div>
+
+              {/* Driver & Invoice Info */}
+              <div className="space-y-1.5">
+                <span className="font-bold text-slate-800 block">معلومات التوصيل والفاتورة:</span>
+                <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 space-y-2 text-purple-950">
+                  <p><span className="text-purple-600 font-bold">المندوب المسند:</span> <strong>{viewingOrder.driverName || 'لم يتم التحديد بعد'}</strong> {viewingOrder.driverPhone ? `(${viewingOrder.driverPhone})` : ''}</p>
+                  <p><span className="text-purple-600 font-bold">ملاحظة الفاتورة:</span> <strong className="font-mono text-emerald-800">{viewingOrder.invoiceNumber || 'تم إرفاق صورة الفاتورة'}</strong></p>
+                  
+                  {viewingOrder.invoiceImageUrl && (
+                    <div className="pt-2 border-t border-purple-200 space-y-1">
+                      <span className="text-xs font-bold text-purple-900 block">صورة الفاتورة المرفوعة من المندوب:</span>
+                      <div className="rounded-xl overflow-hidden border border-purple-200 bg-slate-900 flex justify-center p-2 max-h-48">
+                        <img 
+                          src={viewingOrder.invoiceImageUrl} 
+                          alt="صورة الفاتورة الورقية" 
+                          className="max-h-44 object-contain rounded"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -706,7 +1498,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             <div className="p-4 bg-slate-50 border-t border-gray-100 flex items-center justify-between">
               <button
                 onClick={() => window.print()}
-                className="bg-white hover:bg-gray-100 border border-gray-300 text-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5"
+                className="bg-white hover:bg-gray-100 border border-gray-300 text-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
                 <span>طباعة السند</span>
@@ -714,7 +1506,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               
               <button
                 onClick={() => setViewingOrder(null)}
-                className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-4 py-2 rounded-xl text-xs"
+                className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-4 py-2 rounded-xl text-xs cursor-pointer"
               >
                 إغلاق
               </button>
@@ -723,7 +1515,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         </div>
       )}
 
-      {/* Quick Add Order Modal */}
+      {/* ==================== MODAL 4: QUICK ADD MANUAL ORDER ==================== */}
       {isNewOrderModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
@@ -818,20 +1610,32 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">ملاحظات إضافية:</label>
+                <textarea 
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border rounded-xl"
+                  placeholder="أي تعليمات سريعة..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                <button 
+                  type="button" 
                   onClick={() => setIsNewOrderModalOpen(false)}
-                  className="px-4 py-2 border rounded-xl font-bold text-slate-600"
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-gray-100 font-bold"
                 >
                   إلغاء
                 </button>
-                <button
-                  type="submit"
+                <button 
+                  type="submit" 
                   disabled={isSubmittingOrder}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-bold transition-all shadow-xs disabled:opacity-50 flex items-center gap-1 cursor-pointer"
                 >
-                  {isSubmittingOrder ? 'جاري الحفظ...' : 'حفظ الطلب في Firestore'}
+                  {isSubmittingOrder ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  <span>إضافة الطلب</span>
                 </button>
               </div>
             </form>

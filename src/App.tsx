@@ -10,7 +10,7 @@ import {
   query, 
   orderBy 
 } from './lib/firebase';
-import { Category, Product, Store, AdminUser, TabType, Order, OrderStatus, AuditLog, SupportTicket, FazaaOrder, FazaaCategory, AppUser } from './types';
+import { Category, Product, Store, AdminUser, TabType, Order, OrderStatus, AuditLog, SupportTicket, FazaaOrder, FazaaCategory, AppUser, DriverUser } from './types';
 import { seedInitialFirestoreData } from './services/seedData';
 import { logSystemActivity } from './lib/auditLogger';
 
@@ -42,6 +42,8 @@ const AuditLogsManager = lazy(() => import('./components/AuditLogsManager').then
 const StoreDetailPage = lazy(() => import('./components/StoreDetailPage').then(m => ({ default: m.StoreDetailPage })));
 const FazaaOrdersManager = lazy(() => import('./components/FazaaOrdersManager').then(m => ({ default: m.FazaaOrdersManager })));
 const AppUsersManager = lazy(() => import('./components/AppUsersManager').then(m => ({ default: m.AppUsersManager })));
+const DriversMapManager = lazy(() => import('./components/DriversMapManager').then(m => ({ default: m.DriversMapManager })));
+const InvoicesManager = lazy(() => import('./components/InvoicesManager').then(m => ({ default: m.InvoicesManager })));
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(() => {
@@ -65,6 +67,7 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [fazaaOrders, setFazaaOrders] = useState<FazaaOrder[]>([]);
   const [fazaaCategories, setFazaaCategories] = useState<FazaaCategory[]>([]);
+  const [drivers, setDrivers] = useState<DriverUser[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
@@ -208,7 +211,7 @@ export default function App() {
       setAdminUsers(uList);
       setIsLoadingUsers(false);
     }, (error) => {
-      console.error('Admin Users listener error:', error);
+      console.warn('Admin Users listener fallback:', error);
       setIsLoadingUsers(false);
     });
 
@@ -229,7 +232,7 @@ export default function App() {
       setOrders(oList);
       setIsLoadingOrders(false);
     }, (error) => {
-      console.error('Orders listener error:', error);
+      console.warn('Orders listener fallback:', error);
       setIsLoadingOrders(false);
     });
 
@@ -250,7 +253,7 @@ export default function App() {
       setAuditLogs(aList);
       setIsLoadingAudit(false);
     }, (error) => {
-      console.error('Audit logs listener error:', error);
+      console.warn('Audit logs listener fallback:', error);
       setIsLoadingAudit(false);
     });
 
@@ -269,45 +272,71 @@ export default function App() {
 
       setSupportTickets(tList);
     }, (error) => {
-      console.error('Support tickets listener error:', error);
+      console.warn('Support tickets listener fallback:', error);
     });
 
     return () => unsubscribeTickets();
   }, []);
 
-  // 8. Fazaa Orders Realtime & API Listener
+  // 7b. Drivers Realtime Listener
+  useEffect(() => {
+    const driversQuery = query(collection(db, 'drivers'));
+    const unsubscribeDrivers = onSnapshot(driversQuery, (snapshot) => {
+      const dList: DriverUser[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as DriverUser[];
+      setDrivers(dList);
+    }, (error) => {
+      console.warn('Drivers listener fallback:', error);
+    });
+    return () => unsubscribeDrivers();
+  }, []);
+
+  // 8. Fazaa & Manfaa Orders Realtime Listener
   useEffect(() => {
     setIsLoadingFazaa(true);
+    let fazaaList: FazaaOrder[] = [];
+    let manfaaList: FazaaOrder[] = [];
+
+    const updateCombinedFazaaOrders = () => {
+      const combined = [...fazaaList];
+      manfaaList.forEach(mDoc => {
+        if (!combined.some(f => f.id === mDoc.id)) {
+          combined.push(mDoc);
+        }
+      });
+      setFazaaOrders(combined);
+      setIsLoadingFazaa(false);
+    };
+
     const fazaaQuery = query(collection(db, 'fazaa_orders'));
     const unsubscribeFazaa = onSnapshot(fazaaQuery, (snapshot) => {
-      const list: FazaaOrder[] = snapshot.docs.map(doc => ({
+      fazaaList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as FazaaOrder[];
-
-      if (list.length > 0) {
-        setFazaaOrders(list);
-        setIsLoadingFazaa(false);
-      } else {
-        fetch('/api/fazaa/orders')
-          .then(res => res.json())
-          .then(data => {
-            if (data.orders) setFazaaOrders(data.orders);
-          })
-          .catch(err => console.warn('Fazaa API fallback error:', err))
-          .finally(() => setIsLoadingFazaa(false));
-      }
+      updateCombinedFazaaOrders();
     }, (error) => {
       console.warn('Fazaa orders listener fallback:', error);
-      fetch('/api/fazaa/orders')
-        .then(res => res.json())
-        .then(data => {
-          if (data.orders) setFazaaOrders(data.orders);
-        })
-        .finally(() => setIsLoadingFazaa(false));
+      setIsLoadingFazaa(false);
     });
 
-    return () => unsubscribeFazaa();
+    const manfaaQuery = query(collection(db, 'manfaa_orders'));
+    const unsubscribeManfaa = onSnapshot(manfaaQuery, (snapshot) => {
+      manfaaList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as FazaaOrder[];
+      updateCombinedFazaaOrders();
+    }, (error) => {
+      console.warn('Manfaa orders listener fallback:', error);
+    });
+
+    return () => {
+      unsubscribeFazaa();
+      unsubscribeManfaa();
+    };
   }, []);
 
   // 9. Fazaa Categories Listener
@@ -339,37 +368,41 @@ export default function App() {
     return () => unsubscribeCats();
   }, []);
 
-  // 10. App Users Listener
+  // 10. Clients Collection Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingAppUsers(true);
-    const usersQuery = query(collection(db, 'app_users'));
-    const unsubscribeAppUsers = onSnapshot(usersQuery, (snapshot) => {
+    const clientsQuery = query(collection(db, 'clients'));
+    const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
       const list: AppUser[] = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as AppUser[];
+      
       if (list.length > 0) {
         setAppUsers(list);
         setIsLoadingAppUsers(false);
       } else {
-        fetch('/api/users')
-          .then(res => res.json())
-          .then(data => {
-            if (data.users) setAppUsers(data.users);
-          })
-          .catch(err => console.warn('App users API error:', err))
-          .finally(() => setIsLoadingAppUsers(false));
+        // Fallback check on app_users
+        const legacyQuery = query(collection(db, 'app_users'));
+        onSnapshot(legacyQuery, (legSnap) => {
+          const legList: AppUser[] = legSnap.docs.map(d => ({ id: d.id, ...d.data() })) as AppUser[];
+          if (legList.length > 0) {
+            setAppUsers(legList);
+          } else {
+            fetch('/api/users')
+              .then(res => res.json())
+              .then(data => { if (data.users) setAppUsers(data.users); })
+              .catch(err => console.warn('App users API error:', err));
+          }
+          setIsLoadingAppUsers(false);
+        }, () => setIsLoadingAppUsers(false));
       }
-    }, () => {
-      fetch('/api/users')
-        .then(res => res.json())
-        .then(data => {
-          if (data.users) setAppUsers(data.users);
-        })
-        .finally(() => setIsLoadingAppUsers(false));
+    }, (err) => {
+      console.warn('Clients listener fallback:', err);
+      setIsLoadingAppUsers(false);
     });
 
-    return () => unsubscribeAppUsers();
+    return () => unsubscribeClients();
   }, []);
 
   // Fazaa Handlers
@@ -483,6 +516,17 @@ export default function App() {
         });
         const data = await res.json();
         updatedUser = data.user;
+
+        // Sync with Firestore 'clients' collection
+        try {
+          await updateDoc(doc(db, 'clients', userData.id), {
+            ...userData,
+            role: 'client',
+            updatedAt: new Date().toISOString()
+          });
+        } catch (e) {
+          console.warn('Firestore update doc fallback:', e);
+        }
       } else {
         const res = await fetch('/api/users/profile', {
           method: 'POST',
@@ -491,6 +535,21 @@ export default function App() {
         });
         const data = await res.json();
         updatedUser = data.user;
+
+        // Sync with Firestore 'clients' collection
+        try {
+          const docRef = await addDoc(collection(db, 'clients'), {
+            ...userData,
+            role: 'client',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          if (!updatedUser) {
+            updatedUser = { id: docRef.id, ...userData, role: 'client' };
+          }
+        } catch (e) {
+          console.warn('Firestore add doc fallback:', e);
+        }
       }
 
       if (updatedUser) {
@@ -499,7 +558,7 @@ export default function App() {
           if (exists) return prev.map(u => u.id === updatedUser.id ? updatedUser : u);
           return [updatedUser, ...prev];
         });
-        showToast('تم حفظ حساب وبيانات العميل بنجاح', 'success');
+        showToast('تم حفظ حساب وبيانات العميل في مجموعة العملاء (clients) بنجاح', 'success');
       }
     } catch (err: any) {
       showToast('تعذر حفظ ملف العميل', 'error');
@@ -621,13 +680,15 @@ export default function App() {
   }, [isLoadingCategories, isLoadingProducts, isLoadingStores, isLoadingOrders]);
 
   // Orders CRUD Handlers
-  const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => {
     try {
       const orderRef = doc(db, 'orders', orderId);
-      await updateDoc(orderRef, {
+      const updatePayload: any = {
         status: newStatus,
-        updatedAt: new Date().toISOString()
-      });
+        updatedAt: new Date().toISOString(),
+        ...(extraData || {})
+      };
+      await updateDoc(orderRef, updatePayload);
       const statusLabel = ORDER_STATUS_LABELS[newStatus] || newStatus;
       showToast(`تم تغيير حالة الطلب بنجاح إلى (${statusLabel})`);
 
@@ -639,7 +700,7 @@ export default function App() {
         userRole: currentUser?.role,
         targetType: 'order',
         targetName: orderId,
-        details: `تحديث حالة الطلب إلى: (${statusLabel})`,
+        details: `تحديث حالة الطلب إلى: (${statusLabel}) ${extraData?.driverName ? `وإسناده للمندوب ${extraData.driverName}` : ''} ${extraData?.invoiceNumber ? `مع تسجيل الفاتورة ${extraData.invoiceNumber}` : ''}`,
         severity: 'info'
       });
     } catch (err: any) {
@@ -1081,7 +1142,8 @@ export default function App() {
       case 'reports': return 'التقارير المالية والأداء';
       case 'financial': return 'الإدارة المالية والعمولات';
       case 'quality': return 'تقييمات الجودة والملاحظات';
-      case 'settings': return 'إعدادات النظام العامة';
+      case 'delivery': return 'خريطة المندوبين والتتبع المباشر (Fleet Map)';
+      case 'fazaa': return 'إدارة أسطول وطلبات فزعة';
       default: return 'لوحة تحكم جاهز';
     }
   };
@@ -1302,8 +1364,16 @@ export default function App() {
                     />
                   )}
 
-                  {/* 8. Fazaa Orders & Fleet Management View */}
-                  {(activeTab === 'fazaa' || activeTab === 'delivery') && (
+                  {/* 8. Fleet Drivers Interactive Map View */}
+                  {activeTab === 'delivery' && (
+                    <DriversMapManager 
+                      currentUser={currentUser}
+                      onShowToast={showToast}
+                    />
+                  )}
+
+                  {/* 8b. Fazaa Orders & Fleet Management View */}
+                  {activeTab === 'fazaa' && (
                     <FazaaOrdersManager 
                       orders={fazaaOrders}
                       categories={fazaaCategories}
@@ -1325,12 +1395,22 @@ export default function App() {
                     />
                   )}
 
+                  {/* 9b. Driver Invoices & Receipts Gallery View */}
+                  {activeTab === 'invoices' && (
+                    <InvoicesManager
+                      drivers={drivers}
+                      currentUser={currentUser}
+                      onShowToast={showToast}
+                    />
+                  )}
+
                   {/* 10. Secondary / Specialized Views */}
                   {activeTab !== 'dashboard' && 
                    activeTab !== 'restaurants' && 
                    activeTab !== 'products' && 
                    activeTab !== 'admin' && 
                    activeTab !== 'orders' && 
+                   activeTab !== 'invoices' &&
                    activeTab !== 'audit' && 
                    activeTab !== 'fazaa' && 
                    activeTab !== 'delivery' && 

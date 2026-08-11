@@ -32,11 +32,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     e.preventDefault();
     setError(null);
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanIdentifier = email.trim().toLowerCase();
     const cleanPass = password.trim();
 
-    if (!cleanEmail) {
-      setError('يرجى كتابة البريد الإلكتروني');
+    if (!cleanIdentifier) {
+      setError('يرجى كتابة رقم الهاتف أو البريد الإلكتروني');
       return;
     }
 
@@ -48,12 +48,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsLoading(true);
 
     setTimeout(() => {
-      // Search in registered users (added by Admin or seeded)
-      const foundUser = (users || []).find(u => u?.email && u.email.toLowerCase() === cleanEmail);
+      // Search strictly in registered admin users (from adminUsers collection only)
+      const foundUser = (users || []).find(u => 
+        (u?.phone && u.phone.trim().toLowerCase() === cleanIdentifier) ||
+        (u?.email && u.email.trim().toLowerCase() === cleanIdentifier)
+      );
 
       if (foundUser) {
         if (foundUser.status === 'suspended') {
-          setError('حسابك موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
+          setError('🔒 حساب الإدارة هذا موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
           setIsLoading(false);
           return;
         }
@@ -72,10 +75,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       }
 
       // Default fallback for initial Super Admin
-      if (cleanEmail === 'admin@gmail.com' && cleanPass === 'admin123') {
+      if ((cleanIdentifier === 'admin@gmail.com' || cleanIdentifier === '771122334' || cleanIdentifier === 'admin') && cleanPass === 'admin123') {
         const defaultSuperAdmin: AdminUser = {
           id: 'super-admin-default',
           name: 'المدير العام',
+          phone: '771122334',
           email: 'admin@gmail.com',
           role: 'super_admin',
           status: 'active',
@@ -86,7 +90,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         return;
       }
 
-      setError('لم يتم العثور على حساب بهذا البريد الإلكتروني أو أن كلمة المرور غير صحيحة. تواصل مع المسؤول لإضافة حسابك.');
+      setError('🛑 خطأ أمني: هذا الحساب غير موجود في مجموعة المدراء (adminUsers). تسجيل الدخول هنا مقتصر حصراً على طاقم إدارة لوحة التحكم. العملاء والمندوبون يتسجلون حصراً عبر التطبيقات الخارجية (clients & drivers).');
       setIsLoading(false);
     }, 400);
   };
@@ -155,18 +159,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           {/* Login Form */}
           <form onSubmit={handleLogin} className="space-y-4">
             
-            {/* Email Field */}
+            {/* Identifier Field (Phone / Email) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-300 block">
-                البريد الإلكتروني <span className="text-rose-400">*</span>
+                رقم الهاتف أو البريد الإلكتروني <span className="text-rose-400">*</span>
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
                 <input 
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@company.com"
+                  placeholder="77XXXXXXX أو name@company.com"
                   className="w-full pl-3 pr-10 py-3 rounded-xl bg-slate-950/80 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
                   required
                 />

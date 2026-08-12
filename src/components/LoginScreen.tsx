@@ -61,9 +61,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           return;
         }
 
-        // Verify password
-        const expectedPass = foundUser.password || 'admin123';
-        if (expectedPass !== cleanPass) {
+        // Verify password (accounts without a stored password cannot log in)
+        if (!foundUser.password || foundUser.password !== cleanPass) {
           setError('كلمة المرور غير صحيحة. يرجى المحاولة مجدداً.');
           setIsLoading(false);
           return;
@@ -74,8 +73,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         return;
       }
 
-      // Default fallback for initial Super Admin
-      if ((cleanIdentifier === 'admin@gmail.com' || cleanIdentifier === '771122334' || cleanIdentifier === 'admin') && cleanPass === 'admin123') {
+      // Bootstrap fallback: only available before any admin account exists
+      if (users.length === 0 && (cleanIdentifier === 'admin@gmail.com' || cleanIdentifier === '771122334' || cleanIdentifier === 'admin') && cleanPass === 'admin123') {
         const defaultSuperAdmin: AdminUser = {
           id: 'super-admin-default',
           name: 'المدير العام',

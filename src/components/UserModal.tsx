@@ -37,7 +37,7 @@ export const UserModal: React.FC<UserModalProps> = ({
     if (user) {
       setName(user.name || '');
       setEmail(user.email || '');
-      setPassword(user.password || '');
+      setPassword('');
       setPhone(user.phone || '');
       setRole(user.role || 'stores_manager');
       setStoreId(user.storeId || 'all');
@@ -46,8 +46,8 @@ export const UserModal: React.FC<UserModalProps> = ({
     } else {
       setName('');
       setEmail('');
-      setPassword('password123');
-      setPhone('771122334');
+      setPassword('');
+      setPhone('');
       setRole('stores_manager');
       setStoreId('all');
       setStatus('active');
@@ -102,12 +102,22 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
+    if (!user && !password.trim()) {
+      setError('يرجى تعيين كلمة مرور للحساب الجديد');
+      return;
+    }
+
+    if (password.trim() && password.trim().length < 8) {
+      setError('يجب أن تكون كلمة المرور 8 أحرف على الأقل');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await onSave({
         name: name.trim(),
         email: email.trim(),
-        password: password.trim() || 'password123',
+        ...(password.trim() ? { password: password.trim() } : {}),
         phone: phone.trim(),
         role,
         storeId,
@@ -199,6 +209,25 @@ export const UserModal: React.FC<UserModalProps> = ({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@jahez.com (اختياري)"
+                  className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">
+                كلمة المرور {user
+                  ? <span className="text-slate-400 text-[10px] font-normal">(اتركها فارغة للإبقاء على الحالية)</span>
+                  : <span className="text-red-500">*</span>}
+              </label>
+              <div className="relative">
+                <Key className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
                   className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
                 />
               </div>

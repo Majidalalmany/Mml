@@ -169,7 +169,7 @@ export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
                       <td className="p-3.5 font-mono text-xs text-slate-600">
                         <div className="flex items-center gap-1.5 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-200 w-fit">
                           <Key className="w-3 h-3 text-slate-400" />
-                          <span className="font-bold text-slate-700">{user.password || 'admin123'}</span>
+                          <span className="font-bold text-slate-700">••••••••</span>
                         </div>
                       </td>
 

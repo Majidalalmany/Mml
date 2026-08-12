@@ -19,8 +19,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
   // API route for generating the analytical report
   app.post("/api/gemini/report", async (req, res) => {
@@ -76,16 +76,17 @@ async function startServer() {
 
       if (!response || !response.text) {
         const isUnavailable = lastError?.status === "UNAVAILABLE" || lastError?.message?.includes("503") || lastError?.message?.includes("high demand");
+        console.error("Gemini report generation failed:", lastError);
         const errMsg = isUnavailable 
           ? "الخدمة تواجه ضغطاً كبيراً حالياً من المزود. يرجى المحاولة بعد لحظات."
-          : (lastError?.message || "تعذر توليد التقرير حالياً");
+          : "تعذر توليد التقرير حالياً";
         return res.status(503).json({ error: errMsg });
       }
 
       res.json({ report: response.text });
     } catch (error: any) {
       console.error("Gemini API Error:", error);
-      res.status(500).json({ error: error.message || "حدث خطأ غير متوقع أثناء توليد التقرير" });
+      res.status(500).json({ error: "حدث خطأ غير متوقع أثناء توليد التقرير" });
     }
   });
 

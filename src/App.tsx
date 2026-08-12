@@ -1113,9 +1113,10 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: AdminUser) => {
-    setCurrentUser(user);
+    const { password: _password, ...safeUser } = user;
+    setCurrentUser(safeUser as AdminUser);
     try {
-      localStorage.setItem('jahez_auth_user', JSON.stringify(user));
+      localStorage.setItem('jahez_auth_user', JSON.stringify(safeUser));
     } catch (e) {
       console.error(e);
     }

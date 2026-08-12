@@ -42,6 +42,7 @@ try {
       experimentalForceLongPolling: true
     }, databaseId);
   } catch (err) {
+    console.warn('Firestore long polling initialization fallback:', err);
     dbInstance = getFirestore(app, databaseId);
   }
 }

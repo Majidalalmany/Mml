@@ -362,7 +362,8 @@ export default function App() {
         .then(res => res.json())
         .then(data => {
           if (data.categories) setFazaaCategories(data.categories);
-        });
+        })
+        .catch(err => console.warn('Fazaa categories fallback:', err));
     });
 
     return () => unsubscribeCats();
@@ -408,24 +409,44 @@ export default function App() {
   // Fazaa Handlers
   const handleCreateFazaaOrder = async (orderData: Partial<FazaaOrder>) => {
     try {
-      const apiRes = await fetch('/api/fazaa/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
-      });
-      const resData = await apiRes.json();
-      const newOrderPayload = resData.order || {
+      let apiOrder: FazaaOrder | null = null;
+      let apiError: string | null = null;
+      try {
+        const apiRes = await fetch('/api/fazaa/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(orderData)
+        });
+        const resData = await apiRes.json().catch(() => null);
+        if (apiRes.ok && resData?.order) {
+          apiOrder = resData.order;
+        } else {
+          apiError = resData?.error || `فشل طلب الخادم (${apiRes.status})`;
+          console.warn('Fazaa create-order API error:', apiError);
+        }
+      } catch (e) {
+        apiError = 'تعذر الاتصال بالخادم';
+        console.warn('Fazaa create-order API fallback:', e);
+      }
+
+      const newOrderPayload = apiOrder || ({
         ...orderData,
         id: `fz-${Date.now()}`,
         orderNumber: `FAZAA-${Math.floor(1000 + Math.random() * 9000)}`,
         status: 'new',
         createdAt: new Date().toISOString()
-      };
+      } as FazaaOrder);
 
+      let savedToFirestore = false;
       try {
         await addDoc(collection(db, 'fazaa_orders'), newOrderPayload);
+        savedToFirestore = true;
       } catch (e) {
         console.warn('Firestore addDoc fallback:', e);
+      }
+
+      if (!apiOrder && !savedToFirestore) {
+        throw new Error(apiError || 'تعذر حفظ طلب فزعة في الخادم أو قاعدة البيانات');
       }
 
       setFazaaOrders(prev => [newOrderPayload, ...prev]);
@@ -441,26 +462,43 @@ export default function App() {
         severity: 'info'
       });
     } catch (err: any) {
+      console.error('Error creating Fazaa order:', err);
       showToast(err?.message || 'تعذر إضافة طلب فزعة', 'error');
+      throw err;
     }
   };
 
   const handleUpdateFazaaOrderStatus = async (orderId: string, status: FazaaOrder['status'], driverName?: string, driverPhone?: string) => {
     try {
-      await fetch(`/api/fazaa/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, driverName, driverPhone })
-      });
+      let apiOk = false;
+      try {
+        const apiRes = await fetch(`/api/fazaa/orders/${orderId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, driverName, driverPhone })
+        });
+        apiOk = apiRes.ok;
+        if (!apiRes.ok) {
+          console.warn('Fazaa status API error:', apiRes.status);
+        }
+      } catch (e) {
+        console.warn('Fazaa status API fallback:', e);
+      }
 
+      let firestoreOk = false;
       try {
         await updateDoc(doc(db, 'fazaa_orders', orderId), {
           status,
           ...(driverName !== undefined ? { driverName, driverPhone } : {}),
           updatedAt: new Date().toISOString()
         });
+        firestoreOk = true;
       } catch (e) {
         console.warn('Firestore updateDoc fallback:', e);
+      }
+
+      if (!apiOk && !firestoreOk) {
+        throw new Error('تعذر تحديث حالة طلب فزعة في الخادم أو قاعدة البيانات');
       }
 
       setFazaaOrders(prev => prev.map(o => o.id === orderId ? {
@@ -471,7 +509,9 @@ export default function App() {
 
       showToast('تم تحديث حالة طلب فزعة بنجاح في قاعدة البيانات', 'success');
     } catch (err: any) {
+      console.error('Error updating Fazaa order status:', err);
       showToast(err?.message || 'تعذر تحديث حالة طلب فزعة', 'error');
+      throw err;
     }
   };
 
@@ -482,17 +522,20 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(catData)
       });
-      const data = await res.json();
-      if (data.category) {
-        setFazaaCategories(prev => {
-          const exists = prev.some(c => c.id === data.category.id);
-          if (exists) return prev.map(c => c.id === data.category.id ? data.category : c);
-          return [...prev, data.category];
-        });
-        showToast('تم حفظ تصنيف الشحنة بنجاح', 'success');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.category) {
+        throw new Error(data?.error || 'فشل حفظ تصنيف الشحنة في الخادم');
       }
+      setFazaaCategories(prev => {
+        const exists = prev.some(c => c.id === data.category.id);
+        if (exists) return prev.map(c => c.id === data.category.id ? data.category : c);
+        return [...prev, data.category];
+      });
+      showToast('تم حفظ تصنيف الشحنة بنجاح', 'success');
     } catch (err: any) {
-      showToast('حدث خطأ أثناء حفظ تصنيف الشحنة', 'error');
+      console.error('Error saving Fazaa category:', err);
+      showToast(err?.message || 'حدث خطأ أثناء حفظ تصنيف الشحنة', 'error');
+      throw err;
     }
   };
 
@@ -502,41 +545,70 @@ export default function App() {
         const dupCheck = checkDuplicateUserPhone(userData.phone, appUsers, userData.id);
         if (dupCheck.isDuplicate) {
           const errMsg = `رقم الهاتف (${userData.phone}) مسجل مسبقاً لعميل آخر باسم "${dupCheck.existingName}". يرجى إدخال رقم هاتف مختلف.`;
-          showToast(errMsg, 'error');
           throw new Error(errMsg);
         }
       }
 
       let updatedUser: any = null;
       if (userData.id) {
-        const res = await fetch(`/api/users/profile/${userData.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userData)
-        });
-        const data = await res.json();
-        updatedUser = data.user;
+        let apiOk = false;
+        try {
+          const res = await fetch(`/api/users/profile/${userData.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData)
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data?.user) {
+            updatedUser = data.user;
+            apiOk = true;
+          } else {
+            console.warn('Users API update error:', data?.error || res.status);
+          }
+        } catch (e) {
+          console.warn('Users API update fallback:', e);
+        }
 
         // Sync with Firestore 'clients' collection
+        let firestoreOk = false;
         try {
           await updateDoc(doc(db, 'clients', userData.id), {
             ...userData,
             role: 'client',
             updatedAt: new Date().toISOString()
           });
+          firestoreOk = true;
         } catch (e) {
           console.warn('Firestore update doc fallback:', e);
         }
+
+        if (!apiOk && !firestoreOk) {
+          throw new Error('تعذر حفظ ملف العميل في الخادم أو قاعدة البيانات');
+        }
+        if (!updatedUser) {
+          updatedUser = { ...userData, role: 'client' };
+        }
       } else {
-        const res = await fetch('/api/users/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userData)
-        });
-        const data = await res.json();
-        updatedUser = data.user;
+        let apiOk = false;
+        try {
+          const res = await fetch('/api/users/profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(userData)
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data?.user) {
+            updatedUser = data.user;
+            apiOk = true;
+          } else {
+            console.warn('Users API create error:', data?.error || res.status);
+          }
+        } catch (e) {
+          console.warn('Users API create fallback:', e);
+        }
 
         // Sync with Firestore 'clients' collection
+        let firestoreOk = false;
         try {
           const docRef = await addDoc(collection(db, 'clients'), {
             ...userData,
@@ -544,11 +616,16 @@ export default function App() {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           });
+          firestoreOk = true;
           if (!updatedUser) {
             updatedUser = { id: docRef.id, ...userData, role: 'client' };
           }
         } catch (e) {
           console.warn('Firestore add doc fallback:', e);
+        }
+
+        if (!apiOk && !firestoreOk) {
+          throw new Error('تعذر حفظ ملف العميل في الخادم أو قاعدة البيانات');
         }
       }
 
@@ -561,7 +638,9 @@ export default function App() {
         showToast('تم حفظ حساب وبيانات العميل في مجموعة العملاء (clients) بنجاح', 'success');
       }
     } catch (err: any) {
-      showToast('تعذر حفظ ملف العميل', 'error');
+      console.error('Error saving client profile:', err);
+      showToast(err?.message || 'تعذر حفظ ملف العميل', 'error');
+      throw err;
     }
   };
 
@@ -762,6 +841,7 @@ export default function App() {
         showToast('حدث خطأ أثناء تهيئة البيانات', 'error');
       }
     } catch (err: any) {
+      console.error('Error seeding Firestore data:', err);
       showToast('خطأ في الإتصال بـ Firestore', 'error');
     } finally {
       setIsSeeding(false);

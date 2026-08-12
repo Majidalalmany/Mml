@@ -33,7 +33,11 @@ import {
 import { Order, OrderStatus, Store, AdminUser, DriverUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
-import { db, collection, addDoc, onSnapshot, query } from '../lib/firebase';
+import { db, collection, addDoc } from '../lib/firebase';
+import { subscribeToCollection } from '../lib/firestoreUtils';
+import { formatTime } from '../lib/dateUtils';
+import { generateRefNumber } from '../lib/refUtils';
+import { readFileAsDataURL } from '../lib/imageUtils';
 
 export { ORDER_STATUS_CONFIG };
 
@@ -151,13 +155,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   // Firestore Realtime Drivers Listener
   useEffect(() => {
     try {
-      const driversQuery = query(collection(db, 'drivers'));
-      const unsubscribe = onSnapshot(driversQuery, (snapshot) => {
-        const fetchedList: DriverUser[] = snapshot.docs.map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        })) as DriverUser[];
-
+      const unsubscribe = subscribeToCollection<DriverUser>('drivers', (fetchedList) => {
         if (fetchedList.length > 0) {
           // Merge fetched with defaults to ensure complete list
           const combined = [...fetchedList];
@@ -297,11 +295,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const handleInvoiceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setInvoiceImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      readFileAsDataURL(file)
+        .then(setInvoiceImagePreview)
+        .catch(err => console.error('Failed reading invoice image:', err));
     }
   };
 
@@ -368,7 +364,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     const storeName = selectedStore ? selectedStore.name : 'متجر عام';
     const storeId = selectedStore ? selectedStore.id : '';
 
-    const orderNum = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const orderNum = generateRefNumber('ORD');
     const totalCalc = newItemPrice * newItemQty + 400;
 
     try {
@@ -664,7 +660,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                           </span>
                           <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
                             <Calendar className="w-3 h-3 text-slate-400" />
-                            {order.createdAt ? new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
+                            {order.createdAt ? formatTime(order.createdAt) : 'الآن'}
                           </span>
                         </div>
                       </div>

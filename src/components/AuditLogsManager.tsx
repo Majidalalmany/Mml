@@ -24,6 +24,7 @@ import {
   Settings
 } from 'lucide-react';
 import { AuditLog, AdminUser } from '../types';
+import { formatDateTime } from '../lib/dateUtils';
 
 interface AuditLogsManagerProps {
   logs: AuditLog[];
@@ -294,7 +295,7 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
                         
                         <span className="flex items-center gap-1 font-mono text-[11px] text-slate-400">
                           <Clock className="w-3.5 h-3.5" />
-                          <span>{logItem.createdAt ? new Date(logItem.createdAt).toLocaleString('ar-YE') : 'منذ لحظات'}</span>
+                          <span>{logItem.createdAt ? formatDateTime(logItem.createdAt) : 'منذ لحظات'}</span>
                         </span>
                       </div>
                     </div>

@@ -25,6 +25,7 @@ import {
   Check
 } from 'lucide-react';
 import { TabType } from '../types';
+import { formatDateTime } from '../lib/dateUtils';
 
 interface ViewProps {
   tab: TabType;
@@ -606,7 +607,7 @@ const DiscountsSettlementView: React.FC = () => {
     setSettledItems(prev => [
       {
         ...itemToSettle,
-        settledAt: new Date().toLocaleString('ar-YE'),
+        settledAt: formatDateTime(new Date()),
         settledBy: 'الإدارة المالية'
       },
       ...prev
@@ -621,7 +622,7 @@ const DiscountsSettlementView: React.FC = () => {
 
     const newSettled = unsettledItems.map(item => ({
       ...item,
-      settledAt: new Date().toLocaleString('ar-YE'),
+      settledAt: formatDateTime(new Date()),
       settledBy: 'الإدارة المالية (تسوية جماعية)'
     }));
 

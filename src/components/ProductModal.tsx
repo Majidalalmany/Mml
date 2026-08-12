@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Upload, Package, Check, DollarSign, Image as ImageIcon, Tag, FileText, Barcode, Store as StoreIcon, Layers, Plus, Trash2, Sliders } from 'lucide-react';
 import { Product, Category, Store, ProductPriceOption, ProductExtraOption } from '../types';
 import { compressImageFile } from '../lib/imageUtils';
+import { generateRefNumber } from '../lib/refUtils';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -96,7 +97,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setImageUrl(SAMPLE_IMAGES[0].url);
       setInStock(true);
       setStatus('active');
-      setSku(`PRD-${Math.floor(1000 + Math.random() * 9000)}`);
+      setSku(generateRefNumber('PRD'));
       setDiscountPercent(15);
       setPricesList([
         { name: 'حجم صغير (250جم)', price: 2500 },

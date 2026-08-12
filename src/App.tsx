@@ -5,14 +5,13 @@ import {
   doc, 
   addDoc, 
   updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  orderBy 
+  deleteDoc 
 } from './lib/firebase';
 import { Category, Product, Store, AdminUser, TabType, Order, OrderStatus, AuditLog, SupportTicket, FazaaOrder, FazaaCategory, AppUser, DriverUser } from './types';
 import { seedInitialFirestoreData } from './services/seedData';
 import { logSystemActivity } from './lib/auditLogger';
+import { subscribeToCollection } from './lib/firestoreUtils';
+import { generateRefNumber } from './lib/refUtils';
 
 // Core Layout Components (static for instant initial shell render)
 import { LoginScreen } from './components/LoginScreen';
@@ -129,14 +128,7 @@ export default function App() {
   // 1. Categories Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingCategories(true);
-    const categoriesQuery = query(collection(db, 'categories'));
-    
-    const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-      const catList: Category[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Category[];
-
+    return subscribeToCollection<Category>('categories', (catList) => {
       catList.sort((a, b) => (a.order || 0) - (b.order || 0));
       setCategories(catList);
       setIsLoadingCategories(false);
@@ -144,21 +136,12 @@ export default function App() {
       console.error('Categories listener error:', error);
       setIsLoadingCategories(false);
     });
-
-    return () => unsubscribeCategories();
   }, []);
 
   // 2. Stores Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingStores(true);
-    const storesQuery = query(collection(db, 'stores'));
-
-    const unsubscribeStores = onSnapshot(storesQuery, (snapshot) => {
-      const storeList: Store[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Store[];
-
+    return subscribeToCollection<Store>('stores', (storeList) => {
       setStores(storeList);
       setIsLoadingStores(false);
       
@@ -172,125 +155,64 @@ export default function App() {
       console.error('Stores listener error:', error);
       setIsLoadingStores(false);
     });
-
-    return () => unsubscribeStores();
   }, []);
 
   // 3. Products Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingProducts(true);
-    const productsQuery = query(collection(db, 'products'));
-
-    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      const prodList: Product[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Product[];
-
+    return subscribeToCollection<Product>('products', (prodList) => {
       setProducts(prodList);
       setIsLoadingProducts(false);
     }, (error) => {
       console.error('Products listener error:', error);
       setIsLoadingProducts(false);
     });
-
-    return () => unsubscribeProducts();
   }, []);
 
   // 4. Admin Users Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingUsers(true);
-    const usersQuery = query(collection(db, 'adminUsers'));
-
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const uList: AdminUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AdminUser[];
-
+    return subscribeToCollection<AdminUser>('adminUsers', (uList) => {
       setAdminUsers(uList);
       setIsLoadingUsers(false);
     }, (error) => {
       console.warn('Admin Users listener fallback:', error);
       setIsLoadingUsers(false);
     });
-
-    return () => unsubscribeUsers();
   }, []);
 
   // 5. Orders Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingOrders(true);
-    const ordersQuery = query(collection(db, 'orders'));
-
-    const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
-      const oList: Order[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Order[];
-
+    return subscribeToCollection<Order>('orders', (oList) => {
       setOrders(oList);
       setIsLoadingOrders(false);
     }, (error) => {
       console.warn('Orders listener fallback:', error);
       setIsLoadingOrders(false);
     });
-
-    return () => unsubscribeOrders();
   }, []);
 
   // 6. Audit Logs Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingAudit(true);
-    const auditQuery = query(collection(db, 'audit_logs'));
-
-    const unsubscribeAudit = onSnapshot(auditQuery, (snapshot) => {
-      const aList: AuditLog[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AuditLog[];
-
+    return subscribeToCollection<AuditLog>('audit_logs', (aList) => {
       setAuditLogs(aList);
       setIsLoadingAudit(false);
     }, (error) => {
       console.warn('Audit logs listener fallback:', error);
       setIsLoadingAudit(false);
     });
-
-    return () => unsubscribeAudit();
   }, []);
 
   // 7. Support Tickets Firestore Realtime Listener
   useEffect(() => {
-    const ticketsQuery = query(collection(db, 'support_tickets'));
-
-    const unsubscribeTickets = onSnapshot(ticketsQuery, (snapshot) => {
-      const tList: SupportTicket[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as SupportTicket[];
-
-      setSupportTickets(tList);
-    }, (error) => {
-      console.warn('Support tickets listener fallback:', error);
-    });
-
-    return () => unsubscribeTickets();
+    return subscribeToCollection<SupportTicket>('support_tickets', setSupportTickets);
   }, []);
 
   // 7b. Drivers Realtime Listener
   useEffect(() => {
-    const driversQuery = query(collection(db, 'drivers'));
-    const unsubscribeDrivers = onSnapshot(driversQuery, (snapshot) => {
-      const dList: DriverUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as DriverUser[];
-      setDrivers(dList);
-    }, (error) => {
-      console.warn('Drivers listener fallback:', error);
-    });
-    return () => unsubscribeDrivers();
+    return subscribeToCollection<DriverUser>('drivers', setDrivers);
   }, []);
 
   // 8. Fazaa & Manfaa Orders Realtime Listener
@@ -310,24 +232,16 @@ export default function App() {
       setIsLoadingFazaa(false);
     };
 
-    const fazaaQuery = query(collection(db, 'fazaa_orders'));
-    const unsubscribeFazaa = onSnapshot(fazaaQuery, (snapshot) => {
-      fazaaList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaOrder[];
+    const unsubscribeFazaa = subscribeToCollection<FazaaOrder>('fazaa_orders', (list) => {
+      fazaaList = list;
       updateCombinedFazaaOrders();
     }, (error) => {
       console.warn('Fazaa orders listener fallback:', error);
       setIsLoadingFazaa(false);
     });
 
-    const manfaaQuery = query(collection(db, 'manfaa_orders'));
-    const unsubscribeManfaa = onSnapshot(manfaaQuery, (snapshot) => {
-      manfaaList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaOrder[];
+    const unsubscribeManfaa = subscribeToCollection<FazaaOrder>('manfaa_orders', (list) => {
+      manfaaList = list;
       updateCombinedFazaaOrders();
     }, (error) => {
       console.warn('Manfaa orders listener fallback:', error);
@@ -341,12 +255,7 @@ export default function App() {
 
   // 9. Fazaa Categories Listener
   useEffect(() => {
-    const catQuery = query(collection(db, 'fazaa_categories'));
-    const unsubscribeCats = onSnapshot(catQuery, (snapshot) => {
-      const list: FazaaCategory[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaCategory[];
+    const unsubscribeCats = subscribeToCollection<FazaaCategory>('fazaa_categories', (list) => {
       if (list.length > 0) {
         setFazaaCategories(list);
       } else {
@@ -371,21 +280,13 @@ export default function App() {
   // 10. Clients Collection Firestore Realtime Listener
   useEffect(() => {
     setIsLoadingAppUsers(true);
-    const clientsQuery = query(collection(db, 'clients'));
-    const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
-      const list: AppUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AppUser[];
-      
+    const unsubscribeClients = subscribeToCollection<AppUser>('clients', (list) => {
       if (list.length > 0) {
         setAppUsers(list);
         setIsLoadingAppUsers(false);
       } else {
         // Fallback check on app_users
-        const legacyQuery = query(collection(db, 'app_users'));
-        onSnapshot(legacyQuery, (legSnap) => {
-          const legList: AppUser[] = legSnap.docs.map(d => ({ id: d.id, ...d.data() })) as AppUser[];
+        subscribeToCollection<AppUser>('app_users', (legList) => {
           if (legList.length > 0) {
             setAppUsers(legList);
           } else {
@@ -417,7 +318,7 @@ export default function App() {
       const newOrderPayload = resData.order || {
         ...orderData,
         id: `fz-${Date.now()}`,
-        orderNumber: `FAZAA-${Math.floor(1000 + Math.random() * 9000)}`,
+        orderNumber: generateRefNumber('FAZAA'),
         status: 'new',
         createdAt: new Date().toISOString()
       };

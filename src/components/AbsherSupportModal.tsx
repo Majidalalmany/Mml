@@ -15,6 +15,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { SupportTicket, SupportChatMessage, AdminUser } from '../types';
+import { formatDateTime, formatTime } from '../lib/dateUtils';
 
 interface AbsherSupportModalProps {
   isOpen: boolean;
@@ -240,7 +241,7 @@ export const AbsherSupportModal: React.FC<AbsherSupportModalProps> = ({
 
                     <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-gray-50">
                       <span>طالب التعديل: <strong className="text-slate-800">{tck.requesterName}</strong></span>
-                      <span className="font-mono text-[11px]">{tck.createdAt ? new Date(tck.createdAt).toLocaleString('ar-YE') : ''}</span>
+                      <span className="font-mono text-[11px]">{tck.createdAt ? formatDateTime(tck.createdAt) : ''}</span>
                     </div>
                   </div>
                 ))
@@ -375,7 +376,7 @@ export const AbsherSupportModal: React.FC<AbsherSupportModalProps> = ({
                     </div>
 
                     <span className="text-[9px] text-slate-400 mt-1 px-1 font-mono">
-                      {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : ''}
+                      {msg.createdAt ? formatTime(msg.createdAt) : ''}
                     </span>
                   </div>
                 ))}

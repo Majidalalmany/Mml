@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, User, Phone, Edit2, Plus, Search, ShieldCheck, CheckCircle2, UserCheck, X } from 'lucide-react';
 import { AppUser, AdminUser } from '../types';
 import { checkDuplicateUserPhone } from '../lib/phoneUtils';
+import { formatDate } from '../lib/dateUtils';
 
 interface AppUsersManagerProps {
   users: AppUser[];
@@ -177,7 +178,7 @@ export const AppUsersManager: React.FC<AppUsersManagerProps> = ({
 
             <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
               <span className="text-slate-400 text-[10px]">
-                مسجل منذ: {user.createdAt ? new Date(user.createdAt).toLocaleDateString('ar-YE') : 'سابقاً'}
+                مسجل منذ: {user.createdAt ? formatDate(user.createdAt) : 'سابقاً'}
               </span>
 
               <button

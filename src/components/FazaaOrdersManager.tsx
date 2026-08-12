@@ -31,6 +31,7 @@ import {
   X
 } from 'lucide-react';
 import { FazaaOrder, FazaaCategory, AdminUser } from '../types';
+import { formatDateTime } from '../lib/dateUtils';
 import { hasModulePermission } from '../lib/permissions';
 
 interface FazaaOrdersManagerProps {
@@ -692,7 +693,7 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
                   {/* Order Footer */}
                   <div className="p-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs">
                     <span className="text-slate-400 font-mono text-[11px]">
-                      تاريخ الطلب: {order.createdAt ? new Date(order.createdAt).toLocaleString('ar-YE') : 'الآن'}
+                      تاريخ الطلب: {order.createdAt ? formatDateTime(order.createdAt) : 'الآن'}
                     </span>
 
                     <button

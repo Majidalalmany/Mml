@@ -20,8 +20,10 @@ import {
   RotateCw,
   AlertTriangle
 } from 'lucide-react';
-import { collection, onSnapshot, query, deleteDoc, doc, orderBy } from 'firebase/firestore';
+import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { subscribeToCollection } from '../lib/firestoreUtils';
+import { formatDate, formatTime, formatDateTime } from '../lib/dateUtils';
 import { InvoiceReceipt, DriverUser, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { logAuditEvent } from '../lib/auditLogger';
@@ -58,13 +60,7 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
   useEffect(() => {
     setIsLoading(true);
 
-    const invoicesQuery = query(collection(db, 'driver_invoices'));
-    const unsubscribe = onSnapshot(invoicesQuery, (snapshot) => {
-      const list: InvoiceReceipt[] = snapshot.docs.map(docSnap => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      })) as InvoiceReceipt[];
-
+    const unsubscribe = subscribeToCollection<InvoiceReceipt>('driver_invoices', (list) => {
       // Sort by uploadedAt / createdAt descending
       list.sort((a, b) => {
         const timeA = new Date(a.uploadedAt || a.createdAt || 0).getTime();
@@ -338,8 +334,8 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredInvoices.map((inv) => {
             const uploadDate = inv.uploadedAt ? new Date(inv.uploadedAt) : new Date();
-            const formattedDateStr = uploadDate.toLocaleDateString('ar-YE', { year: 'numeric', month: 'short', day: 'numeric' });
-            const formattedTimeStr = uploadDate.toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' });
+            const formattedDateStr = formatDate(uploadDate, { year: 'numeric', month: 'short', day: 'numeric' });
+            const formattedTimeStr = formatTime(uploadDate);
 
             return (
               <div 
@@ -486,7 +482,7 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
                   <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
                     <span>المندوب: <strong className="text-amber-300">{activeLightbox.driverName}</strong></span>
                     <span>•</span>
-                    <span>الرفع: <strong className="text-blue-300">{new Date(activeLightbox.uploadedAt || '').toLocaleString('ar-YE')}</strong></span>
+                    <span>الرفع: <strong className="text-blue-300">{formatDateTime(activeLightbox.uploadedAt || '')}</strong></span>
                   </div>
                 </div>
               </div>

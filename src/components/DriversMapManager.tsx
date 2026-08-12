@@ -30,8 +30,11 @@ import {
   EyeOff
 } from 'lucide-react';
 import L from 'leaflet';
-import { collection, query, where, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { subscribeToCollection } from '../lib/firestoreUtils';
+import { formatTime } from '../lib/dateUtils';
+import { generateRefNumber } from '../lib/refUtils';
 import { DriverUser, AdminUser, ActiveDeliveryOrder } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { DedicatedDeliveryMapModal } from './DedicatedDeliveryMapModal';
@@ -284,7 +287,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     if (!order && (driver.assignedOrdersCount || 0) > 0) {
       order = {
         id: `ord-${driver.id}-${Date.now()}`,
-        orderNumber: `FZ-${Math.floor(1000 + Math.random() * 8999)}`,
+        orderNumber: generateRefNumber('FZ'),
         customerName: 'الأستاذ عبد الله المقطري',
         customerPhone: '77' + Math.floor(1000000 + Math.random() * 8999999),
         storeName: 'مركز خدمة فزعة المباشر',
@@ -466,7 +469,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
           html: `
             <div class="bg-indigo-600 text-white font-bold text-[10px] px-2 py-1 rounded-full shadow-lg border-2 border-white whitespace-nowrap flex items-center gap-1">
               <span>🏁 بداية المسار</span>
-              <span class="opacity-80 font-mono">(${new Date(startPt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })})</span>
+              <span class="opacity-80 font-mono">(${formatTime(startPt.timestamp)})</span>
             </div>
           `,
           className: 'custom-start-flag-marker',
@@ -486,7 +489,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
             });
 
             const nodeMarker = L.marker([pt.lat, pt.lng], { icon: nodeIcon }).addTo(map);
-            const timeFormatted = new Date(pt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' });
+            const timeFormatted = formatTime(pt.timestamp);
             nodeMarker.bindTooltip(`الساعة: ${timeFormatted} | السرعة: ${pt.speed || 0} كم/س`, { direction: 'top' });
             trailMarkersRef.current.push(nodeMarker);
           }
@@ -511,15 +514,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   // 1. Fetch Drivers from Firestore in Realtime
   useEffect(() => {
     setIsLoading(true);
-    const q = query(collection(db, 'drivers'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: DriverUser[] = snapshot.docs.map(docSnap => ({
-        id: docSnap.id,
-        ...docSnap.data()
-      })) as DriverUser[];
-
-      const syncTimeStr = new Date().toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const unsubscribe = subscribeToCollection<DriverUser>('drivers', (list) => {
+      const syncTimeStr = formatTime(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastFirestoreSyncTime(syncTimeStr);
 
       if (list.length > 0) {

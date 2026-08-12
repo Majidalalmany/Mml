@@ -119,7 +119,7 @@ export const StoreModal: React.FC<StoreModalProps> = ({
             dateVal = store.createdAt.toDate().toISOString().split('T')[0];
           }
         } catch (e) {
-          // fallback
+          console.warn('Failed parsing store createdAt date:', e);
         }
       }
       setCreatedDate(dateVal);

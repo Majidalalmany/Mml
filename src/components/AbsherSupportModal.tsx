@@ -76,6 +76,7 @@ export const AbsherSupportModal: React.FC<AbsherSupportModalProps> = ({
       setIsSubmitting(false);
       setActiveTab('list');
     } catch (err) {
+      console.error('Error creating support ticket:', err);
       setIsSubmitting(false);
     }
   };
@@ -90,6 +91,7 @@ export const AbsherSupportModal: React.FC<AbsherSupportModalProps> = ({
       setChatReplyText('');
       setIsSubmitting(false);
     } catch (err) {
+      console.error('Error sending support reply:', err);
       setIsSubmitting(false);
     }
   };

@@ -110,7 +110,7 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
 
   // Default Categories if empty
   const defaultTypesList = safeCategories.length > 0 
-    ? safeCategories.map(c => c.name) 
+    ? safeCategories.map(c => c.name || '') 
     : [
         'قابلة للكسر',
         'ترت وجاتو - كابتن مختص',
@@ -131,12 +131,12 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
 
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
-        const numMatch = order.orderNumber?.toLowerCase().includes(term);
-        const nameMatch = order.customerName?.toLowerCase().includes(term);
-        const phoneMatch = order.customerPhone?.toLowerCase().includes(term);
-        const pickupMatch = order.pickupAddress?.toLowerCase().includes(term);
-        const delivMatch = order.deliveryAddress?.toLowerCase().includes(term);
-        const typeMatch = order.orderType?.toLowerCase().includes(term);
+        const numMatch = (order.orderNumber || '').toLowerCase().includes(term);
+        const nameMatch = (order.customerName || '').toLowerCase().includes(term);
+        const phoneMatch = (order.customerPhone || '').toLowerCase().includes(term);
+        const pickupMatch = (order.pickupAddress || '').toLowerCase().includes(term);
+        const delivMatch = (order.deliveryAddress || '').toLowerCase().includes(term);
+        const typeMatch = (order.orderType || '').toLowerCase().includes(term);
         if (!numMatch && !nameMatch && !phoneMatch && !pickupMatch && !delivMatch && !typeMatch) {
           return false;
         }
@@ -279,8 +279,9 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
     }
   };
 
-  const getRiskBadge = (typeStr: string) => {
-    if (typeStr.includes('كسر') || typeStr.includes('زجاج')) {
+  const getRiskBadge = (typeStr?: string | null) => {
+    const s = typeStr || '';
+    if (s.includes('كسر') || s.includes('زجاج')) {
       return (
         <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0">
           <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
@@ -288,7 +289,7 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
         </span>
       );
     }
-    if (typeStr.includes('ترت') || typeStr.includes('جاتو') || typeStr.includes('كيك') || typeStr.includes('كابتن مختص')) {
+    if (s.includes('ترت') || s.includes('جاتو') || s.includes('كيك') || s.includes('كابتن مختص')) {
       return (
         <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0">
           <Zap className="w-3.5 h-3.5 text-purple-600" />
@@ -296,7 +297,7 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
         </span>
       );
     }
-    if (typeStr.includes('أوراق') || typeStr.includes('مستندات')) {
+    if (s.includes('أوراق') || s.includes('مستندات')) {
       return (
         <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0">
           <FileText className="w-3.5 h-3.5 text-amber-600" />
@@ -911,8 +912,8 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {(safeCategories.length > 0 ? safeCategories : defaultTypesList.map((name, i) => ({
               id: `def-${i}`,
-              name,
-              riskLevel: name.includes('كسر') ? 'fragile' : (name.includes('كيك') || name.includes('جاتو') ? 'special_handle' : 'normal'),
+              name: name || 'شحنة عامة',
+              riskLevel: (name || '').includes('كسر') ? 'fragile' : ((name || '').includes('كيك') || (name || '').includes('جاتو') ? 'special_handle' : 'normal'),
               weightLimit: 'حسب الشروط',
               driverInstructions: 'حمل وتسليم بحذر وفق تعليمات العميل',
               isActive: true

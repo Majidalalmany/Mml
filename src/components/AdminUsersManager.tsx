@@ -169,7 +169,9 @@ export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
                       <td className="p-3.5 font-mono text-xs text-slate-600">
                         <div className="flex items-center gap-1.5 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-200 w-fit">
                           <Key className="w-3 h-3 text-slate-400" />
-                          <span className="font-bold text-slate-700">{user.password || 'admin123'}</span>
+                          <span className="font-bold text-slate-700">
+                            {isSuperAdmin ? (user.password || '••••••••') : '••••••••'}
+                          </span>
                         </div>
                       </td>
 
@@ -202,41 +204,50 @@ export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
 
                       <td className="p-3.5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => onEditUser(user)}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1 shadow-2xs transition-transform active:scale-95 cursor-pointer"
-                            title="تعديل الحساب وكلمة المرور والصلاحيات"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>تعديل الصلاحيات / كلمة المرور</span>
-                          </button>
+                          {isSuperAdmin && (
+                            <>
+                              <button
+                                onClick={() => onEditUser(user)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1 shadow-2xs transition-transform active:scale-95 cursor-pointer"
+                                title="تعديل الحساب وكلمة المرور والصلاحيات"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>تعديل الصلاحيات / كلمة المرور</span>
+                              </button>
 
-                          {deleteConfirmId === user.id ? (
-                            <div className="flex items-center gap-1 bg-rose-50 p-1 rounded-lg border border-rose-200">
-                              <button
-                                onClick={() => {
-                                  onDeleteUser(user.id);
-                                  setDeleteConfirmId(null);
-                                }}
-                                className="px-2 py-0.5 bg-rose-600 text-white text-[11px] font-bold rounded cursor-pointer"
-                              >
-                                تأكيد الحذف النهائي
-                              </button>
-                              <button
-                                onClick={() => setDeleteConfirmId(null)}
-                                className="px-1 text-slate-500 hover:text-slate-800 text-[11px] cursor-pointer"
-                              >
-                                إلغاء
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setDeleteConfirmId(user.id)}
-                              className="w-8 h-8 rounded-lg bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95 cursor-pointer"
-                              title="حذف الحساب نهائياً"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                              {deleteConfirmId === user.id ? (
+                                <div className="flex items-center gap-1 bg-rose-50 p-1 rounded-lg border border-rose-200">
+                                  <button
+                                    onClick={() => {
+                                      onDeleteUser(user.id);
+                                      setDeleteConfirmId(null);
+                                    }}
+                                    className="px-2 py-0.5 bg-rose-600 text-white text-[11px] font-bold rounded cursor-pointer"
+                                  >
+                                    تأكيد الحذف النهائي
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirmId(null)}
+                                    className="px-1 text-slate-500 hover:text-slate-800 text-[11px] cursor-pointer"
+                                  >
+                                    إلغاء
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setDeleteConfirmId(user.id)}
+                                  className="w-8 h-8 rounded-lg bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95 cursor-pointer"
+                                  title="حذف الحساب نهائياً"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {!isSuperAdmin && (
+                            <span className="text-[11px] text-slate-400 font-bold bg-gray-100 px-2 py-1 rounded-md">
+                              عرض فقط
+                            </span>
                           )}
                         </div>
                       </td>

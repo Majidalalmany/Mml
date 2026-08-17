@@ -21,7 +21,8 @@ import {
   PlusCircle,
   AlertCircle
 } from 'lucide-react';
-import { Store, Category, Product } from '../types';
+import { Store, Category, Product, AdminUser } from '../types';
+import { hasModulePermission } from '../lib/permissions';
 
 interface StoreDetailPageProps {
   store: Store;
@@ -34,6 +35,7 @@ interface StoreDetailPageProps {
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
   onToggleProductInStock?: (product: Product) => void;
+  currentUser?: AdminUser | null;
 }
 
 export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
@@ -46,8 +48,14 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
   onAddProductForStore,
   onEditProduct,
   onDeleteProduct,
-  onToggleProductInStock
+  onToggleProductInStock,
+  currentUser
 }) => {
+  const canEditStore = hasModulePermission(currentUser, 'restaurants', 'edit');
+  const canCreateProduct = hasModulePermission(currentUser, 'products', 'create');
+  const canEditProduct = hasModulePermission(currentUser, 'products', 'edit');
+  const canDeleteProduct = hasModulePermission(currentUser, 'products', 'delete');
+
   // Current active section selected by user
   const storeSections = store.sections || ['وجبات رئيسية', 'مقبلات وسلطات', 'مشروبات وعصائر'];
   const [selectedSection, setSelectedSection] = useState<string>(storeSections[0] || 'الكل');
@@ -152,15 +160,17 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onEditStore(store)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-all cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>تعديل بيانات المتجر والخريطة</span>
-          </button>
-        </div>
+        {canEditStore && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onEditStore(store)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-all cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>تعديل بيانات المتجر والخريطة</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. Basic Store Info Header (5 Core Required Fields) */}
@@ -231,7 +241,25 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
 
           {/* Field 5: Store Location / Address */}
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1 col-span-1 sm:col-span-2 lg:col-span-1">
-            <span className="text-[11px] font-bold text-slate-400 block">5. الموقع (العنوان)</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 block">5. الموقع (العنوان)</span>
+              {(store.googleMapsUrl || store.mapLink || (store.latitude && store.longitude)) && (
+                <a
+                  href={
+                    store.mapLink || 
+                    store.googleMapsUrl || 
+                    `https://maps.google.com/?q=${store.latitude},${store.longitude}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5 cursor-pointer"
+                  title="فتح الموقع في خرائط Google"
+                >
+                  <span>الخريطة</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              )}
+            </div>
             <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1" title={store.address}>
               <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
               <span className="truncate">{store.address || 'العنوان الرئيسي'}</span>
@@ -252,13 +280,15 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => onAddProductForStore(store.id, selectedSection === 'الكل' ? (storeSections[0] || 'عام') : selectedSection)}
-          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer active:scale-95"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ إضافة منتج جديد لهذا المتجر</span>
-        </button>
+        {canCreateProduct && (
+          <button
+            onClick={() => onAddProductForStore(store.id, selectedSection === 'الكل' ? (storeSections[0] || 'عام') : selectedSection)}
+            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ إضافة منتج جديد لهذا المتجر</span>
+          </button>
+        )}
       </div>
 
       {/* 3. Product Management Section Container */}
@@ -473,75 +503,132 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
                       </div>
                     </div>
 
-                    {/* Pricing & Extras Badges */}
-                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
+                    {/* Pricing & Extras / Details Badges */}
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2">
                       <div>
                         <span className="text-[10px] text-slate-400 block font-bold">السعر:</span>
-                        <span className="text-sm font-bold text-blue-700 font-sans">
-                          {prod.price.toLocaleString()} ريال
-                        </span>
+                        {prod.hasDiscount && prod.discountPrice && prod.discountPrice < prod.price ? (
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm font-bold text-rose-700 font-sans">
+                                {prod.discountPrice.toLocaleString()} ريال
+                              </span>
+                              <span className="bg-rose-100 text-rose-800 text-[9px] px-1.5 py-0.2 rounded font-bold">
+                                خصم {prod.discountPercent ? `${prod.discountPercent}%` : ''}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 line-through font-sans">
+                              {prod.price.toLocaleString()} ريال
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-bold text-blue-700 font-sans">
+                            {prod.price.toLocaleString()} ريال
+                          </span>
+                        )}
                       </div>
 
-                      {prod.options && prod.options.length > 0 && (
-                        <div className="text-right">
-                          <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold block border border-emerald-100">
-                            + {prod.options.length} مجموعات إضافات وصوصات
+                      {/* Universal Attributes / Combinations Badge */}
+                      {prod.productAttributes && prod.productAttributes.length > 0 ? (
+                        <div className="text-right space-y-0.5">
+                          <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-bold block border border-indigo-100">
+                            {prod.pricingStrategy === 'matrix' && prod.variantCombinations ? (
+                              `${prod.variantCombinations.length} تشكيلات ومقاسات`
+                            ) : (
+                              prod.productAttributes.map(a => `${a.name}: ${a.values.slice(0, 3).join(', ')}${a.values.length > 3 ? '...' : ''}`).join(' | ')
+                            )}
                           </span>
+                          {prod.options && prod.options.length > 0 && (
+                            <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded font-bold inline-block border border-emerald-100">
+                              + {prod.options.length} إضافات
+                            </span>
+                          )}
                         </div>
+                      ) : (
+                        <>
+                          {/* Food Extras Badge */}
+                          {prod.options && prod.options.length > 0 && (
+                            <div className="text-right">
+                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold block border border-emerald-100">
+                                + {prod.options.length} خيارات وإضافات
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Clothing Sizes / Colors Badge */}
+                          {prod.clothingSizes && prod.clothingSizes.length > 0 && (
+                            <div className="text-right">
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded font-bold block border border-purple-100">
+                                {prod.clothingSizes.join(' · ')}
+                              </span>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
 
                   {/* Actions Footer */}
                   <div className="p-3 bg-gray-50/70 border-t border-gray-100 flex items-center justify-between gap-1 flex-wrap">
-                    <button
-                      onClick={() => onEditProduct(prod)}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>تعديل</span>
-                    </button>
+                    {canEditProduct && (
+                      <button
+                        onClick={() => onEditProduct(prod)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>تعديل</span>
+                      </button>
+                    )}
 
                     {onToggleProductInStock && (
                       <button
-                        onClick={() => onToggleProductInStock(prod)}
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                        disabled={!canEditProduct}
+                        onClick={() => canEditProduct && onToggleProductInStock(prod)}
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md transition-all ${
                           prod.inStock
                             ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300'
                             : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300'
-                        }`}
+                        } ${!canEditProduct ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                         title={prod.inStock ? 'إخفاء المنتج (تعطيل التوفر)' : 'إظهار المنتج (تفعيل التوفر)'}
                       >
                         {prod.inStock ? 'إخفاء (غير متوفر)' : 'إظهار (متوفر)'}
                       </button>
                     )}
 
-                    {deleteConfirmProdId === prod.id ? (
-                      <div className="flex items-center gap-1 bg-rose-50 p-1 rounded-md border border-rose-200">
-                        <span className="text-[10px] font-bold text-rose-700">تأكيد؟</span>
+                    {canDeleteProduct && (
+                      deleteConfirmProdId === prod.id ? (
+                        <div className="flex items-center gap-1 bg-rose-50 p-1 rounded-md border border-rose-200">
+                          <span className="text-[10px] font-bold text-rose-700">تأكيد؟</span>
+                          <button
+                            onClick={() => {
+                              onDeleteProduct(prod.id);
+                              setDeleteConfirmProdId(null);
+                            }}
+                            className="px-1.5 py-0.5 bg-rose-600 text-white text-[10px] font-bold rounded cursor-pointer"
+                          >
+                            حذف
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirmProdId(null)}
+                            className="px-1.5 py-0.5 bg-gray-200 text-slate-700 text-[10px] font-bold rounded cursor-pointer"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      ) : (
                         <button
-                          onClick={() => {
-                            onDeleteProduct(prod.id);
-                            setDeleteConfirmProdId(null);
-                          }}
-                          className="px-1.5 py-0.5 bg-rose-600 text-white text-[10px] font-bold rounded cursor-pointer"
+                          onClick={() => setDeleteConfirmProdId(prod.id)}
+                          className="text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
                         >
                           حذف
                         </button>
-                        <button
-                          onClick={() => setDeleteConfirmProdId(null)}
-                          className="px-1.5 py-0.5 bg-gray-200 text-slate-700 text-[10px] font-bold rounded cursor-pointer"
-                        >
-                          إلغاء
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setDeleteConfirmProdId(prod.id)}
-                        className="text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
-                      >
-                        حذف
-                      </button>
+                      )
+                    )}
+
+                    {!canEditProduct && !canDeleteProduct && (
+                      <span className="text-[11px] text-slate-400 font-bold bg-gray-100 px-2 py-0.5 rounded">
+                        عرض فقط
+                      </span>
                     )}
                   </div>
                 </div>

@@ -17,7 +17,8 @@ import {
   RefreshCw,
   Tag
 } from 'lucide-react';
-import { Product, Category } from '../types';
+import { Product, Category, AdminUser } from '../types';
+import { hasModulePermission } from '../lib/permissions';
 
 interface ProductsManagerProps {
   products: Product[];
@@ -29,6 +30,7 @@ interface ProductsManagerProps {
   onDeleteProduct: (productId: string) => void;
   onToggleInStock: (product: Product) => void;
   onSeedData: () => void;
+  currentUser?: AdminUser | null;
 }
 
 export const ProductsManager: React.FC<ProductsManagerProps> = ({
@@ -40,12 +42,17 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
   onViewProduct,
   onDeleteProduct,
   onToggleInStock,
-  onSeedData
+  onSeedData,
+  currentUser
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'inStock' | 'outOfStock'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  const canCreate = hasModulePermission(currentUser, 'products', 'create');
+  const canEdit = hasModulePermission(currentUser, 'products', 'edit');
+  const canDelete = hasModulePermission(currentUser, 'products', 'delete');
 
   // Filtered Products
   const filteredProducts = useMemo(() => {
@@ -92,15 +99,17 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={onAddProduct}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold shadow-xs transition-all active:scale-98 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>إضافة منتج جديد</span>
-          </button>
-        </div>
+        {canCreate && (
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              onClick={onAddProduct}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold shadow-xs transition-all active:scale-98 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <span>إضافة منتج جديد</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter Toolbar */}
@@ -253,12 +262,32 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
 
                     {/* Price */}
                     <td className="p-3.5 font-sans">
-                      <div className="font-bold text-slate-800">
-                        {product.price.toLocaleString()} <span className="text-[11px] font-normal text-slate-400">ريال</span>
-                      </div>
-                      {product.originalPrice && product.originalPrice > product.price && (
-                        <div className="text-[10px] text-slate-300 line-through">
-                          {product.originalPrice.toLocaleString()} ريال
+                      {product.hasDiscount && product.discountPrice && product.discountPrice < product.price ? (
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-rose-700">
+                              {product.discountPrice.toLocaleString()} <span className="text-[10px] font-normal text-rose-500">ريال</span>
+                            </span>
+                            <span className="bg-rose-100 text-rose-800 text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                              خصم
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 line-through">
+                            {product.price.toLocaleString()} ريال
+                          </div>
+                        </div>
+                      ) : product.originalPrice && product.originalPrice > product.price ? (
+                        <div>
+                          <div className="font-bold text-slate-800">
+                            {product.price.toLocaleString()} <span className="text-[11px] font-normal text-slate-400">ريال</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 line-through">
+                            {product.originalPrice.toLocaleString()} ريال
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="font-bold text-slate-800">
+                          {product.price.toLocaleString()} <span className="text-[11px] font-normal text-slate-400">ريال</span>
                         </div>
                       )}
                     </td>
@@ -266,12 +295,13 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
                     {/* Stock Switch */}
                     <td className="p-3.5 text-center">
                       <button
-                        onClick={() => onToggleInStock(product)}
+                        disabled={!canEdit}
+                        onClick={() => canEdit && onToggleInStock(product)}
                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${
                           product.inStock 
                             ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                             : 'bg-red-100 text-red-700 hover:bg-red-200'
-                        }`}
+                        } ${!canEdit ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                         title="انقر لتغيير التوفر المباشر في Firestore"
                       >
                         {product.inStock ? (
@@ -294,48 +324,52 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
                         {/* View Eye Button */}
                         <button
                           onClick={() => onViewProduct(product)}
-                          className="w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95"
+                          className="w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95 cursor-pointer"
                           title="معاينة تفاصيل المنتج"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
 
                         {/* Edit Pencil Button */}
-                        <button
-                          onClick={() => onEditProduct(product)}
-                          className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95"
-                          title="تعديل المنتج"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => onEditProduct(product)}
+                            className="w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95 cursor-pointer"
+                            title="تعديل المنتج"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
 
                         {/* Delete Button */}
-                        {deleteConfirmId === product.id ? (
-                          <div className="flex items-center gap-1 bg-red-50 p-1 rounded-lg border border-red-200 animate-in fade-in">
+                        {canDelete && (
+                          deleteConfirmId === product.id ? (
+                            <div className="flex items-center gap-1 bg-red-50 p-1 rounded-lg border border-red-200 animate-in fade-in">
+                              <button
+                                onClick={() => {
+                                  onDeleteProduct(product.id);
+                                  setDeleteConfirmId(null);
+                                }}
+                                className="px-2 py-0.5 bg-red-600 text-white text-[11px] font-bold rounded cursor-pointer"
+                              >
+                                حذف
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(null)}
+                                className="px-1 text-slate-500 hover:text-slate-800 text-[11px] cursor-pointer"
+                              >
+                                إلغاء
+                              </button>
+                            </div>
+                          ) : (
                             <button
-                              onClick={() => {
-                                onDeleteProduct(product.id);
-                                setDeleteConfirmId(null);
-                              }}
-                              className="px-2 py-0.5 bg-red-600 text-white text-[11px] font-bold rounded"
+                              onClick={() => setDeleteConfirmId(product.id)}
+                              className="w-8 h-8 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95 cursor-pointer"
+                              title="حذف المنتج من Firestore"
                             >
-                              حذف
+                              <X className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(null)}
-                              className="px-1 text-slate-500 hover:text-slate-800 text-[11px]"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setDeleteConfirmId(product.id)}
-                            className="w-8 h-8 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-2xs transition-transform active:scale-95"
-                            title="حذف المنتج من Firestore"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
+                          )
                         )}
                       </div>
                     </td>

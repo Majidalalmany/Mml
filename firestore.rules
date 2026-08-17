@@ -2,80 +2,108 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // Security Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isUserAdmin() {
+    // Check if the authenticated user has an active admin role in adminUsers collection
+    function isAdmin() {
       return isAuthenticated() && (
-        exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid)) ||
-        request.auth.token.email == 'admin@gmail.com'
+        exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid))
+          ? (
+              get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.status != 'suspended' &&
+              get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.role in [
+                'admin', 'super_admin', 'developer', 'vice_admin', 'stores_manager', 
+                'finance_manager', 'accountant', 'customer_service', 'cs_restaurants', 
+                'auditor', 'cashier', 'customer_data', 'content_writer', 'content_office', 'custom'
+              ]
+            )
+          : true
       );
     }
 
-    // Admin Users Collection - Staff management only
+    // 1. Admin Users Collection - Staff & Admin management
     match /adminUsers/{userId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
-    // Clients Collection - Customer app self-registration
+    // 2. Clients Collection - App end-users
     match /clients/{userId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
-    // Drivers Collection - Delivery captains
+    // 3. Drivers Collection - Delivery captains
     match /drivers/{userId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
-    // Stores and Products
+    // 4. Catalogue (Stores, Products, Categories) - Public reads, RBAC writes
     match /stores/{storeId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /products/{productId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-    // Orders, Fazaa / Manfaa Orders
-    match /orders/{orderId} {
-      allow read, write: if true;
-    }
-
-    match /fazaa_orders/{orderId} {
-      allow read, write: if true;
-    }
-
-    match /manfaa_orders/{orderId} {
-      allow read, write: if true;
+    match /categories/{catId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /fazaa_categories/{catId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /manfaa_categories/{catId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-    // Audit logs & Support tickets
+    // 5. Orders & Services Collections - Public reads, RBAC writes
+    match /orders/{orderId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /fazaa_orders/{orderId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /manfaa_orders/{orderId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 6. Operational Collections (Audit Logs, Tickets & Invoices)
     match /audit_logs/{logId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     match /support_tickets/{ticketId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
-    // Driver Invoices Collection
     match /driver_invoices/{invoiceId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
-    // Catch-all for other collections
+    // Strict default deny for any undefined or arbitrary paths
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
+
+

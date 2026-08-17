@@ -20,8 +20,7 @@ import {
   RotateCw,
   AlertTriangle
 } from 'lucide-react';
-import { collection, onSnapshot, query, deleteDoc, doc, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { collection, onSnapshot, query, deleteDoc, doc, orderBy, db } from '../lib/firebase';
 import { InvoiceReceipt, DriverUser, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { logAuditEvent } from '../lib/auditLogger';

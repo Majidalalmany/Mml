@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   X, 
   Navigation, 
@@ -12,7 +12,10 @@ import {
   ShieldCheck,
   Compass,
   Car,
-  Bike
+  Bike,
+  Layers,
+  Zap,
+  Globe
 } from 'lucide-react';
 import L from 'leaflet';
 import { DriverUser, ActiveDeliveryOrder } from '../types';
@@ -24,6 +27,27 @@ interface DedicatedDeliveryMapModalProps {
   order: ActiveDeliveryOrder | null;
 }
 
+type TileLayerType = 'osm' | 'voyager' | 'satellite';
+
+const TILE_LAYERS: Record<TileLayerType, { name: string; url: string; subdomains?: string; maxZoom?: number }> = {
+  voyager: {
+    name: 'شوارع ناصعة',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    maxZoom: 19
+  },
+  osm: {
+    name: 'OpenStreetMap',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    maxZoom: 19
+  },
+  satellite: {
+    name: 'أقمار صناعية 🛰️',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 18
+  }
+};
+
 export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps> = ({
   isOpen,
   onClose,
@@ -32,6 +56,28 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletMapRef = useRef<L.Map | null>(null);
+  const activeTileLayerRef = useRef<L.TileLayer | null>(null);
+  const [selectedLayer, setSelectedLayer] = useState<TileLayerType>('voyager');
+
+  // Change Tile Layer dynamically
+  const switchTileLayer = (layerType: TileLayerType) => {
+    setSelectedLayer(layerType);
+    const map = leafletMapRef.current;
+    if (!map) return;
+
+    if (activeTileLayerRef.current) {
+      map.removeLayer(activeTileLayerRef.current);
+    }
+
+    const config = TILE_LAYERS[layerType];
+    const newLayer = L.tileLayer(config.url, {
+      maxZoom: config.maxZoom || 19,
+      subdomains: config.subdomains || 'abc',
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    activeTileLayerRef.current = newLayer;
+  };
 
   useEffect(() => {
     if (!isOpen || !driver || !order || !mapContainerRef.current) return;
@@ -53,26 +99,29 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
       const pickupLat = order.pickupLat || (driverLat - 0.005);
       const pickupLng = order.pickupLng || (driverLng - 0.005);
 
-      // Create Leaflet Map
+      // Create Leaflet Map with OpenStreetMap / Carto
       const map = L.map(mapContainerRef.current, {
         zoomControl: true,
         attributionControl: false
-      }).setView([driverLat, driverLng], 15);
+      }).setView([driverLat, driverLng], 14);
 
       leafletMapRef.current = map;
 
-      // Add High-Quality Leaflet Tile Layer (CartoDB Positron / OSM for crisp Google-like visual)
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd'
+      // Add selected Tile Layer (Carto Voyager by default for crisp aesthetic)
+      const layerConfig = TILE_LAYERS[selectedLayer];
+      const initialLayer = L.tileLayer(layerConfig.url, {
+        maxZoom: layerConfig.maxZoom || 19,
+        subdomains: layerConfig.subdomains || 'abcd',
+        attribution: '&copy; OpenStreetMap contributors'
       }).addTo(map);
+      activeTileLayerRef.current = initialLayer;
 
       // 1. Pickup Store Marker
       if (pickupLat && pickupLng) {
         const pickupIcon = L.divIcon({
           html: `
             <div class="relative flex items-center justify-center">
-              <div class="w-9 h-9 rounded-full bg-amber-500 border-2 border-white text-white shadow-lg flex items-center justify-center font-bold text-sm">
+              <div class="w-10 h-10 rounded-full bg-amber-500 border-2 border-white text-white shadow-xl flex items-center justify-center font-bold text-sm">
                 🏪
               </div>
               <div class="absolute -bottom-6 bg-slate-900 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-amber-500/80">
@@ -81,8 +130,8 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
             </div>
           `,
           className: 'custom-pickup-modal-marker',
-          iconSize: [36, 36],
-          iconAnchor: [18, 18]
+          iconSize: [40, 40],
+          iconAnchor: [20, 20]
         });
 
         const pickupMarker = L.marker([pickupLat, pickupLng], { icon: pickupIcon }).addTo(map);
@@ -101,18 +150,18 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
       const driverIcon = L.divIcon({
         html: `
           <div class="relative flex items-center justify-center">
-            <div class="absolute -inset-2 rounded-full bg-blue-500/40 animate-ping"></div>
-            <div class="w-11 h-11 rounded-full bg-blue-600 border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-lg">
+            <div class="absolute -inset-2.5 rounded-full bg-blue-500/40 animate-ping"></div>
+            <div class="w-12 h-12 rounded-full bg-blue-600 border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-xl">
               ${vehicleEmoji}
             </div>
-            <div class="absolute -bottom-7 bg-blue-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-lg whitespace-nowrap border border-blue-400">
+            <div class="absolute -bottom-7 bg-blue-950 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow-lg whitespace-nowrap border border-blue-400">
               الكابتن: ${driver.name.split(' ')[0]} (${driver.speed || 35} كم/س)
             </div>
           </div>
         `,
         className: 'custom-driver-modal-marker',
-        iconSize: [44, 44],
-        iconAnchor: [22, 22]
+        iconSize: [48, 48],
+        iconAnchor: [24, 24]
       });
 
       const driverMarker = L.marker([driverLat, driverLng], { icon: driverIcon }).addTo(map);
@@ -129,7 +178,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
       const destIcon = L.divIcon({
         html: `
           <div class="relative flex items-center justify-center">
-            <div class="absolute -inset-3 rounded-full bg-rose-500/30 animate-pulse"></div>
+            <div class="absolute -inset-3.5 rounded-full bg-rose-500/40 animate-pulse"></div>
             <div class="w-12 h-12 rounded-full bg-rose-600 border-3 border-white text-white shadow-2xl flex items-center justify-center font-bold text-xl">
               🎯
             </div>
@@ -162,13 +211,13 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
       const polyline = L.polyline(routePoints, {
         color: '#2563eb',
         weight: 6,
-        opacity: 0.85,
+        opacity: 0.9,
         dashArray: '10, 8'
       }).addTo(map);
 
       // Fit map bounds with generous padding
       map.fitBounds(polyline.getBounds(), { padding: [80, 80] });
-    }, 150);
+    }, 120);
 
     return () => {
       clearTimeout(timer);
@@ -183,16 +232,14 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
 
   const driverLat = driver.lat || 15.3694;
   const driverLng = driver.lng || 44.1910;
-  const hasExactCoords = Boolean(order.destLat && order.destLng);
   const destLat = order.destLat || (driverLat + 0.015);
   const destLng = order.destLng || (driverLng + 0.015);
 
   const dropoffTextAddress = order.dropoffAddress || order.deliveryAddress || 'صنعاء - اليمن';
-  const pickupTextAddress = order.pickupAddress || 'نقطة الاستلام';
-
-  const googleMapsUrl = hasExactCoords 
-    ? `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${destLat},${destLng}&travelmode=driving`
-    : `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${encodeURIComponent(dropoffTextAddress)}&travelmode=driving`;
+  
+  // Free OpenStreetMap Direction & External Browser URL (no API key required)
+  const osmDirectionsUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${driverLat}%2C${driverLng}%3B${destLat}%2C${destLng}`;
+  const googleMapsWebUrl = `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${destLat},${destLng}&travelmode=driving`;
 
   const whatsappUrl = `https://wa.me/967${order.customerPhone}?text=${encodeURIComponent(`حياك الله أخي ${order.customerName}، نود إبلاغك بأن الكابتن ${driver.name} في طريقه إليك لتسليم الطلب رقم #${order.orderNumber}`)}`;
 
@@ -203,35 +250,35 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
         {/* Modal Header */}
         <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-bold text-lg shrink-0">
-              📍
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-lg shrink-0">
+              🗺️
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="font-extrabold text-base sm:text-lg text-white">
-                  خريطة التتبع المباشر لوجهة العميل - الطلب #{order.orderNumber}
+                  خريطة التتبع المباشر (OpenStreetMap & Leaflet) - الطلب #{order.orderNumber}
                 </h2>
                 <span className="hidden sm:inline-flex bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2.5 py-0.5 rounded-full font-bold items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  جارِ التسليم الان
+                  مباشر ومجاني 100%
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                تتبع مسار الكابتن <strong className="text-amber-300">{driver.name}</strong> مباشرة نحو العميل <strong className="text-emerald-300">{order.customerName}</strong>
+                تتبع مسار الكابتن <strong className="text-amber-300">{driver.name}</strong> نحو العميل <strong className="text-emerald-300">{order.customerName}</strong>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <a
-              href={googleMapsUrl}
+              href={osmDirectionsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-              title="فتح المسار في تطبيق خرائط جوجل الخارجي"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+              title="فتح مسار التوجيه في OpenStreetMap"
             >
-              <Compass className="w-4 h-4 text-amber-300" />
-              <span className="hidden md:inline">فتح في خرائط Google</span>
+              <Globe className="w-4 h-4 text-emerald-200" />
+              <span className="hidden md:inline">مسار OpenStreetMap</span>
               <ExternalLink className="w-3.5 h-3.5 opacity-80" />
             </a>
 
@@ -251,19 +298,50 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
           {/* Map View Area (8 cols on desktop) */}
           <div className="lg:col-span-8 relative h-[320px] sm:h-[400px] lg:h-full flex flex-col bg-slate-100">
             
-            {/* Top Bar Floating Status inside Map */}
-            <div className="absolute top-3 right-3 left-3 z-[400] bg-slate-900/90 text-white backdrop-blur-md p-3 rounded-xl shadow-xl border border-slate-700 flex items-center justify-between gap-2 text-xs">
+            {/* Top Bar Floating Status & Free Layer Switcher */}
+            <div className="absolute top-3 right-3 left-3 z-[400] bg-slate-900/90 text-white backdrop-blur-md p-2.5 sm:p-3 rounded-xl shadow-xl border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-amber-400 animate-pulse" />
-                <span>المسار النشط: <strong className="text-amber-300">{order.storeName || 'المتجر'}</strong> ➔ <strong className="text-emerald-300">{order.customerName}</strong></span>
+                <span>المسار: <strong className="text-amber-300">{order.storeName || 'المتجر'}</strong> ➔ <strong className="text-emerald-300">{order.customerName}</strong></span>
               </div>
-              <div className="flex items-center gap-3 font-mono font-bold text-slate-200 shrink-0">
-                <span>⏱️ {order.estimatedMinutes || 12} دقيقة</span>
-                <span>📏 {order.distanceKm || 3.5} كم</span>
+              
+              <div className="flex items-center gap-2">
+                {/* Free Tile Layer Switcher */}
+                <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                  <button
+                    onClick={() => switchTileLayer('voyager')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                      selectedLayer === 'voyager' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    شوارع عصرية
+                  </button>
+                  <button
+                    onClick={() => switchTileLayer('osm')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                      selectedLayer === 'osm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    OSM 🗺️
+                  </button>
+                  <button
+                    onClick={() => switchTileLayer('satellite')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                      selectedLayer === 'satellite' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    أقمار صناعية 🛰️
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 font-mono font-bold text-slate-200 shrink-0 text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
+                  <span>⏱️ {order.estimatedMinutes || 12} د</span>
+                  <span>📏 {order.distanceKm || 3.5} كم</span>
+                </div>
               </div>
             </div>
 
-            {/* Dedicated Map Container */}
+            {/* Dedicated Leaflet Map Container */}
             <div ref={mapContainerRef} className="w-full flex-1 z-0" />
 
             {/* Map Legend Overlay */}
@@ -402,18 +480,28 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
             {/* Quick Actions Footer inside Modal */}
             <div className="pt-2 space-y-2 mt-auto">
               <a
-                href={googleMapsUrl}
+                href={osmDirectionsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
               >
-                <Compass className="w-4 h-4 text-amber-400 animate-spin" />
-                <span>فتح التوجيه المباشر عبر Google Maps</span>
+                <Globe className="w-4 h-4 text-emerald-200" />
+                <span>فتح التوجيه الملاحي في OpenStreetMap</span>
+              </a>
+
+              <a
+                href={googleMapsWebUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer text-center"
+              >
+                <Compass className="w-4 h-4 text-amber-400" />
+                <span>عرض في متصفح خرائط الويب</span>
               </a>
 
               <button
                 onClick={onClose}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 إغلاق هذه النافذة والعودة للخريطة الرئيسية
               </button>

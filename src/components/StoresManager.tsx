@@ -28,8 +28,9 @@ import {
   PlusCircle,
   FolderPlus
 } from 'lucide-react';
-import { Store, Category, Product } from '../types';
-import { getCategoryDefaultLogo, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES } from '../lib/categoryUtils';
+import { Store, Category, Product, AdminUser } from '../types';
+import { getCategoryDefaultLogo, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES, getAllServiceCategories, CategoryVectorIcon, resolveCategoryIconKey } from '../lib/categoryUtils';
+import { hasModulePermission } from '../lib/permissions';
 
 interface StoresManagerProps {
   stores: Store[];
@@ -40,24 +41,15 @@ interface StoresManagerProps {
   onSelectCategoryFilter?: (filter: string) => void;
   isAddServiceTriggered?: boolean;
   onCloseAddServiceTrigger?: () => void;
+  onAddCategory?: () => void;
+  onSaveCategory?: (categoryData: Partial<Category>) => Promise<void> | void;
   onAddStore: () => void;
   onEditStore: (store: Store) => void;
   onDeleteStore: (storeId: string) => void;
   onToggleStatus: (store: Store, newStatus: 'open' | 'closed' | 'maintenance') => void;
   onSelectStore?: (store: Store) => void;
+  currentUser?: AdminUser | null;
 }
-
-// Initial Default Services List (فئات الخدمات العامة)
-const DEFAULT_SERVICES = [
-  { id: 'restaurants', name: 'المطاعم والوجبات السريعة', icon: '🍔', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  { id: 'pharmacies', name: 'الصيدليات والمستلزمات الطبية', icon: '💊', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  { id: 'supermarkets', name: 'السوبرماركت والتموينات', icon: '🛒', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  { id: 'electronics', name: 'الإلكترونيات والهواتف', icon: '📱', color: 'bg-purple-50 text-purple-700 border-purple-200' },
-  { id: 'spices', name: 'البهارات والمكسرات والقهوة', icon: '🌶️', color: 'bg-amber-50 text-amber-800 border-amber-200' },
-  { id: 'flowers', name: 'الورود والهدايا', icon: '🌸', color: 'bg-rose-50 text-rose-700 border-rose-200' },
-  { id: 'sweets', name: 'الحلويات والمخبوزات', icon: '🧁', color: 'bg-pink-50 text-pink-700 border-pink-200' },
-  { id: 'meats', name: 'اللحوم والأسماك الطازجة', icon: '🥩', color: 'bg-red-50 text-red-700 border-red-200' }
-];
 
 export const StoresManager: React.FC<StoresManagerProps> = ({
   stores = [],
@@ -68,20 +60,40 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   onSelectCategoryFilter,
   isAddServiceTriggered,
   onCloseAddServiceTrigger,
+  onAddCategory,
+  onSaveCategory,
   onAddStore,
   onEditStore,
   onDeleteStore,
   onToggleStatus,
-  onSelectStore
+  onSelectStore,
+  currentUser
 }) => {
+  const safeStores = stores || [];
+  const safeProducts = products || [];
+  const safeCategories = categories || [];
+
+  // All active categories dynamically unified and deduplicated from categories state
+  const allServiceCategories = getAllServiceCategories(safeCategories, safeStores);
+
+  // Find first category that actually has stores
+  const firstCategoryWithStores = allServiceCategories.find(cat => 
+    safeStores.some(s => isStoreInServiceCategory(s, cat.id, safeCategories))
+  ) || allServiceCategories[0];
+  const defaultInitialCategory = selectedCategoryFilter || firstCategoryWithStores?.id || 'cat-1';
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedService, setSelectedService] = useState<string>('all');
+  const [selectedService, setSelectedService] = useState<string>(() => selectedCategoryFilter || defaultInitialCategory);
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [deleteConfirmStoreId, setDeleteConfirmStoreId] = useState<string | null>(null);
 
+  const canCreate = hasModulePermission(currentUser, 'restaurants', 'create');
+  const canEdit = hasModulePermission(currentUser, 'restaurants', 'edit');
+  const canDelete = hasModulePermission(currentUser, 'restaurants', 'delete');
+
   // Sync with prop when selected from sidebar
   useEffect(() => {
-    if (selectedCategoryFilter !== undefined) {
+    if (selectedCategoryFilter !== undefined && selectedCategoryFilter !== 'all') {
       setSelectedService(selectedCategoryFilter);
     }
   }, [selectedCategoryFilter]);
@@ -94,34 +106,59 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
     }
   }, [isAddServiceTriggered, onCloseAddServiceTrigger]);
 
-  // Custom Services State (إمكانية إضافة خدمات جديدة يدوياً)
-  const [customServices, setCustomServices] = useState(DEFAULT_SERVICES);
   const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
-  const [newServiceIcon, setNewServiceIcon] = useState('📦');
-
-  const safeStores = stores || [];
-  const safeProducts = products || [];
+  const [newServiceIcon, setNewServiceIcon] = useState('Tag');
 
   // Handle adding new service activity category
-  const handleAddCustomService = (e: React.FormEvent) => {
+  const handleAddCustomService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newServiceName.trim()) return;
+    const cleanName = newServiceName.trim();
+    if (!cleanName) return;
 
-    const newServ = {
-      id: `serv-${Date.now()}`,
-      name: newServiceName.trim(),
-      icon: newServiceIcon || '📦',
-      color: 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    const uniqueId = `cat-${Date.now()}`;
+    const newCategoryData: Category = {
+      id: uniqueId,
+      name: cleanName,
+      label: cleanName,
+      serviceName: cleanName,
+      icon: newServiceIcon || 'Tag',
+      serviceType: 'default',
+      status: 'active',
+      order: (safeCategories.length || 0) + 1,
+      createdAt: new Date().toISOString()
     };
 
-    setCustomServices(prev => [...prev, newServ]);
-    setSelectedService(newServ.name);
+    // Save directly to localStorage for immediate resilience
+    try {
+      const saved = JSON.parse(localStorage.getItem('jahez_custom_categories') || '[]');
+      const filtered = saved.filter((c: any) => c.name !== cleanName && c.id !== uniqueId);
+      filtered.push(newCategoryData);
+      localStorage.setItem('jahez_custom_categories', JSON.stringify(filtered));
+    } catch (e) {
+      console.warn('localStorage save fallback:', e);
+    }
+
+    // Call backend / App state handler if available
+    if (onSaveCategory) {
+      try {
+        await onSaveCategory(newCategoryData);
+      } catch (saveErr) {
+        console.warn('onSaveCategory non-blocking fallback:', saveErr);
+      }
+    }
+
+    // Force selection immediately to the new category without resetting to first tab
+    setSelectedService(uniqueId);
+    if (onSelectCategoryFilter) {
+      onSelectCategoryFilter(uniqueId);
+    }
+
     setNewServiceName('');
     setIsAddServiceModalOpen(false);
   };
 
-  const activeServiceDef = findServiceCategory(selectedService);
+  const activeServiceDef = findServiceCategory(selectedService, safeCategories) || allServiceCategories[0];
 
   const filteredStores = safeStores.filter(s => {
     const activityName = (s.activityType || s.categoryName || '').toLowerCase();
@@ -130,7 +167,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
       s.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
       activityName.includes(searchTerm.toLowerCase());
 
-    const matchesService = isStoreInServiceCategory(s, selectedService);
+    const matchesService = isStoreInServiceCategory(s, selectedService, safeCategories);
     const matchesStatus = selectedStatus === 'all' || s.status === selectedStatus;
 
     return matchesSearch && matchesService && matchesStatus;
@@ -141,10 +178,17 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   };
 
   const handleSwitchCategory = (catId: string) => {
-    setSelectedService(catId);
+    const targetCat = (!catId || catId === 'all') ? defaultInitialCategory : catId;
+    setSelectedService(targetCat);
     if (onSelectCategoryFilter) {
-      onSelectCategoryFilter(catId);
+      onSelectCategoryFilter(targetCat);
     }
+  };
+
+  const handleResetFilter = () => {
+    setSearchTerm('');
+    setSelectedStatus('all');
+    handleSwitchCategory(defaultInitialCategory);
   };
 
   return (
@@ -152,80 +196,67 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
       {/* 1. Category Page Header & Action Bar */}
       <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-2xl">{activeServiceDef?.icon || '🏪'}</span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
+              <CategoryVectorIcon icon={activeServiceDef?.icon} className="w-5 h-5" />
+            </div>
             <h2 className="text-xl font-bold text-slate-900">
-              {activeServiceDef ? activeServiceDef.label : (selectedService === 'all' ? 'دليل كافة المتاجر والخدمات' : selectedService)}
+              {activeServiceDef ? activeServiceDef.label : selectedService}
             </h2>
-            <span className="bg-blue-100 text-blue-800 text-xs px-3 py-0.5 rounded-full font-bold">
-              {filteredStores.length} متجر مسجل
+            <span className="bg-blue-100 text-blue-800 text-xs px-3 py-0.5 rounded-full font-bold font-sans">
+              {filteredStores.length} متجر مسجل في هذا القسم
             </span>
           </div>
           <p className="text-xs text-slate-500">
-            {activeServiceDef?.description || 'اختر فئة الخدمة من القائمة لاستعراض متاجرها أو إضافة متجر جديد وتخصيص كافة أقسامه ومنتجاته'}
+            {activeServiceDef?.description || 'إدارة ومتابعة المتاجر المسجلة في هذا النشاط التجاري وتخصيص كافة أقسامه ومنتجاته'}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {selectedService !== 'all' && (
-            <button
-              onClick={() => handleSwitchCategory('all')}
-              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              <span>🌐</span>
-              <span>عرض كافة الأقسام</span>
-            </button>
+          {canCreate && (
+            <>
+              <button
+                onClick={() => setIsAddServiceModalOpen(true)}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <FolderPlus className="w-4 h-4 text-amber-400" />
+                <span>+ إضافة فئة خدمة جديدة</span>
+              </button>
+
+              <button
+                onClick={onAddStore}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>
+                  {activeServiceDef ? `إضافة متجر جديد في ${activeServiceDef.label}` : 'إضافة متجر جديد'}
+                </span>
+              </button>
+            </>
           )}
-
-          <button
-            onClick={() => setIsAddServiceModalOpen(true)}
-            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-          >
-            <FolderPlus className="w-4 h-4 text-amber-400" />
-            <span>+ إضافة فئة خدمة جديدة</span>
-          </button>
-
-          <button
-            onClick={onAddStore}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>
-              {activeServiceDef ? `إضافة متجر جديد في ${activeServiceDef.label}` : 'إضافة متجر جديد'}
-            </span>
-          </button>
         </div>
       </div>
 
       {/* 2. Horizontal Category Quick Switcher Tabs */}
       <div className="bg-white p-3 rounded-xl shadow-xs border border-gray-200">
+        <div className="text-[11px] font-bold text-slate-400 mb-2 px-1">
+          اختر قسم النشاط التجاري لتصفية المتاجر بدقة:
+        </div>
         <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
-          <button
-            onClick={() => handleSwitchCategory('all')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer border ${
-              selectedService === 'all'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                : 'bg-white text-slate-700 border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            <span>🌐</span>
-            <span>كافة المتاجر ({safeStores.length})</span>
-          </button>
-
-          {SERVICE_CATEGORIES.map((cat) => {
-            const count = safeStores.filter(s => isStoreInServiceCategory(s, cat.id)).length;
-            const isSelected = selectedService !== 'all' && isStoreInServiceCategory({ categoryId: selectedService, categoryName: selectedService }, cat.id);
+          {allServiceCategories.map((cat) => {
+            const count = safeStores.filter(s => isStoreInServiceCategory(s, cat.id, safeCategories)).length;
+            const isSelected = isStoreInServiceCategory({ categoryId: selectedService, categoryName: selectedService }, cat.id, safeCategories) || selectedService === cat.id;
             return (
               <button
                 key={cat.id}
                 onClick={() => handleSwitchCategory(cat.id)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer border ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-2 cursor-pointer border ${
                   isSelected
                     ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
                     : 'bg-white text-slate-700 border-gray-200 hover:bg-gray-50'
                 }`}
               >
-                <span>{cat.icon}</span>
+                <CategoryVectorIcon icon={cat.icon} className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-blue-600'}`} />
                 <span>{cat.label}</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-sans font-semibold ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-slate-600'}`}>
                   {count}
@@ -244,7 +275,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
             type="text" 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder={activeServiceDef ? `بحث داخل ${activeServiceDef.label} بالاسم أو العنوان...` : "بحث عن متجر بالاسم، النشاط، أو العنوان..."}
+            placeholder={activeServiceDef ? `بحث داخل قسم ${activeServiceDef.label} بالاسم أو العنوان...` : "بحث عن متجر بالاسم، النشاط، أو العنوان..."}
             className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-xs focus:ring-2 focus:ring-blue-500 bg-gray-50/50"
           />
           {searchTerm && (
@@ -257,14 +288,15 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {selectedService !== 'all' && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {(selectedService !== defaultInitialCategory || searchTerm || selectedStatus !== 'all') && (
             <button
-              onClick={() => handleSwitchCategory('all')}
-              className="text-xs text-blue-600 hover:text-blue-800 font-bold bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 flex items-center gap-1"
+              onClick={handleResetFilter}
+              className="text-xs text-slate-700 hover:text-blue-700 font-bold bg-slate-100 hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="إعادة التصفية للقسم الأول الرئيسي"
             >
-              <span>إلغاء تصفية القسم ({activeServiceDef?.label || selectedService})</span>
-              <X className="w-3.5 h-3.5" />
+              <span>إعادة ضبط التصفية</span>
+              <X className="w-3.5 h-3.5 text-slate-500" />
             </button>
           )}
 
@@ -475,9 +507,12 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                     <div className="flex items-center gap-2">
                       {/* Status / Visibility Toggle */}
                       <select
+                        disabled={!canEdit}
                         value={store.status}
-                        onChange={(e) => onToggleStatus(store, e.target.value as 'open' | 'closed' | 'maintenance')}
-                        className="flex-1 px-2.5 py-2 rounded-xl border border-gray-200 text-[11px] font-bold bg-slate-50 text-slate-700 focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                        onChange={(e) => canEdit && onToggleStatus(store, e.target.value as 'open' | 'closed' | 'maintenance')}
+                        className={`flex-1 px-2.5 py-2 rounded-xl border border-gray-200 text-[11px] font-bold bg-slate-50 text-slate-700 focus:ring-1 focus:ring-blue-500 ${
+                          !canEdit ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                        }`}
                         title="تعديل حالة المتجر (إخفاء/إظهار)"
                       >
                         <option value="open">🟢 مفتوح (ظاهر)</option>
@@ -486,44 +521,48 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                       </select>
 
                       {/* Edit Store Button */}
-                      <button
-                        onClick={() => onEditStore(store)}
-                        className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold"
-                        title="تعديل بيانات المتجر"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                        <span className="hidden sm:inline">تعديل</span>
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => onEditStore(store)}
+                          className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold"
+                          title="تعديل بيانات المتجر"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                          <span className="hidden sm:inline">تعديل</span>
+                        </button>
+                      )}
 
                       {/* Delete Store Button & Confirmation */}
-                      {deleteConfirmStoreId === store.id ? (
-                        <div className="flex items-center gap-1.5 bg-rose-50 p-1.5 rounded-xl border border-rose-300 animate-in fade-in">
-                          <span className="text-[11px] font-bold text-rose-800 shrink-0">تأكيد الحذف النهائي؟</span>
+                      {canDelete && (
+                        deleteConfirmStoreId === store.id ? (
+                          <div className="flex items-center gap-1.5 bg-rose-50 p-1.5 rounded-xl border border-rose-300 animate-in fade-in">
+                            <span className="text-[11px] font-bold text-rose-800 shrink-0">تأكيد الحذف النهائي؟</span>
+                            <button
+                              onClick={() => {
+                                onDeleteStore(store.id);
+                                setDeleteConfirmStoreId(null);
+                              }}
+                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded-lg shadow-2xs transition-all cursor-pointer"
+                            >
+                              نعم، حذف
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirmStoreId(null)}
+                              className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-slate-700 text-[11px] font-bold rounded-lg transition-all cursor-pointer"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => {
-                              onDeleteStore(store.id);
-                              setDeleteConfirmStoreId(null);
-                            }}
-                            className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded-lg shadow-2xs transition-all cursor-pointer"
+                            onClick={() => setDeleteConfirmStoreId(store.id)}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold border border-rose-200"
+                            title="حذف المتجر نهائياً"
                           >
-                            نعم، حذف
+                            <Trash2 className="w-4 h-4" />
+                            <span className="hidden sm:inline">حذف</span>
                           </button>
-                          <button
-                            onClick={() => setDeleteConfirmStoreId(null)}
-                            className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-slate-700 text-[11px] font-bold rounded-lg transition-all cursor-pointer"
-                          >
-                            إلغاء
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setDeleteConfirmStoreId(store.id)}
-                          className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold border border-rose-200"
-                          title="حذف المتجر نهائياً"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          <span className="hidden sm:inline">حذف</span>
-                        </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -567,20 +606,34 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  الأيقونة أو التعبير الإيموجي الرمزي:
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  أيقونة الفئة (Vector Icon):
                 </label>
-                <div className="flex gap-2">
-                  {['🌶️', '🥩', '🧁', '💊', '📱', '🛒', '🌸', '☕', '📦', '🛠️'].map((emo) => (
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'Briefcase', label: 'حقائب' },
+                    { id: 'Footprints', label: 'أحذية' },
+                    { id: 'Shirt', label: 'ملابس' },
+                    { id: 'ShoppingBag', label: 'بقالة' },
+                    { id: 'UtensilsCrossed', label: 'مطاعم' },
+                    { id: 'Pill', label: 'صيدلية' },
+                    { id: 'Tv', label: 'إلكترونيات' },
+                    { id: 'Sparkles', label: 'عطور' },
+                    { id: 'Flame', label: 'بهارات' },
+                    { id: 'Tag', label: 'عام' }
+                  ].map((item) => (
                     <button
-                      key={emo}
+                      key={item.id}
                       type="button"
-                      onClick={() => setNewServiceIcon(emo)}
-                      className={`text-xl p-2 rounded-xl border ${
-                        newServiceIcon === emo ? 'bg-blue-100 border-blue-500' : 'bg-gray-50 border-gray-200'
+                      onClick={() => setNewServiceIcon(item.id)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        newServiceIcon === item.id 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-gray-50 text-slate-700 border-gray-200 hover:bg-gray-100'
                       }`}
                     >
-                      {emo}
+                      <CategoryVectorIcon icon={item.id} className="w-3.5 h-3.5" />
+                      <span>{item.label}</span>
                     </button>
                   ))}
                 </div>

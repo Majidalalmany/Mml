@@ -2,6 +2,8 @@ export interface Category {
   id: string;
   name: string;
   nameEn?: string;
+  label?: string;
+  serviceName?: string;
   icon?: string;
   coverUrl?: string;
   order: number;
@@ -9,7 +11,16 @@ export interface Category {
   description?: string;
   productCount?: number;
   storeCount?: number;
+  serviceType?: 'restaurant' | 'clothing' | 'supermarket' | 'default';
   createdAt?: any;
+}
+
+export interface DaySchedule {
+  day: string;
+  isOpen: boolean;
+  openTime: string;
+  closeTime: string;
+  is24Hours?: boolean;
 }
 
 export interface Store {
@@ -24,9 +35,12 @@ export interface Store {
   latitude?: number;
   longitude?: number;
   googleMapsUrl?: string;
+  mapLink?: string; // رابط خرائط جوجل الصريح أو المختصر
   logoUrl?: string;
+  logoFileName?: string;
   coverUrl?: string;
   workingHours: string;
+  weeklySchedule?: DaySchedule[];
   serviceType: 'delivery' | 'pickup' | 'both';
   deliveryFeeType: 'fixed' | 'distance';
   fixedDeliveryFee?: number;
@@ -39,6 +53,22 @@ export interface Store {
 export interface ProductPriceOption {
   name: string;
   price: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
+}
+
+export interface ClothingSizeOption {
+  size: string;
+  price: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
+}
+
+export interface SupermarketWeightOption {
+  unit: string;
+  price: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
 }
 
 export interface ProductExtraOption {
@@ -47,24 +77,96 @@ export interface ProductExtraOption {
   items: { name: string; extraPrice: number }[];
 }
 
+// Universal Product Variant System Types
+export type PricingStrategyMode = 'flat' | 'single_attribute' | 'matrix';
+
+export type ProductAttributeType = 
+  | 'size'        // المقاسات
+  | 'color'       // الألوان
+  | 'flavor'      // النكهات
+  | 'weight'      // الأوزان والعبوات
+  | 'storage'     // سعة الذاكرة / الحجم
+  | 'material'    // نوع الخامة / القماش
+  | 'custom';     // خاصية مخصصة
+
+export interface ProductAttribute {
+  id: string;
+  name: string;           // e.g. "المقاس" or "اللون" or "النكهة" or "العبوة"
+  type: ProductAttributeType;
+  values: string[];       // e.g. ["S", "M", "L", "XL"] or ["أسود", "أبيض"]
+}
+
+// Single Attribute Pricing Delta (for mode 'single_attribute')
+export interface SingleAttributePriceItem {
+  value: string;          // e.g. "حجم كبير" or "1 كجم"
+  price: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
+  sku?: string;
+  stock?: number;
+  inStock?: boolean;
+}
+
+// Full Combination Matrix Variant (for mode 'matrix')
+export interface ProductVariantCombination {
+  id: string;
+  title: string;          // e.g. "M / أسود" or "128GB / فضي"
+  options: Record<string, string>; // e.g. { "المقاس": "M", "اللون": "أسود" }
+  price: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
+  sku?: string;
+  stock?: number;
+  inStock: boolean;
+}
+
 export interface Product {
   id: string;
   name: string;
   description?: string;
   price: number;
   originalPrice?: number;
+  hasDiscount?: boolean;
+  discountPrice?: number;
   categoryId: string;
   categoryName?: string;
   storeId?: string;
   storeName?: string;
   sectionName?: string;
   imageUrl?: string;
+  galleryImages?: string[];
   inStock: boolean;
   status: 'active' | 'inactive';
   sku?: string;
+  stockQuantity?: number;
+  
+  // Universal Product Variant System
+  pricingStrategy?: PricingStrategyMode;
+  productAttributes?: ProductAttribute[];
+  pricingDriverAttributeId?: string;
+  singleAttributePrices?: SingleAttributePriceItem[];
+  variantCombinations?: ProductVariantCombination[];
+  
   prices?: ProductPriceOption[];
   options?: ProductExtraOption[];
   discountPercent?: number;
+  // Category-specific attributes
+  attributes?: Record<string, any>;
+  // Food & Restaurant fields
+  mealOptions?: string[];
+  // Clothing fields
+  colors?: string[];
+  clothingSizes?: string[];
+  clothingPriceType?: 'unified' | 'custom';
+  clothingSizePrices?: ClothingSizeOption[];
+  material?: string;
+  // Supermarket fields
+  supermarketWeights?: SupermarketWeightOption[];
+  // Electronics & General fields
+  techSpecs?: string;
+  storageOptions?: string[];
+  warranty?: string;
+  generalFeatures?: string[];
   createdAt?: any;
 }
 

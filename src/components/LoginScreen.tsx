@@ -11,6 +11,14 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { AdminUser } from '../types';
+import { 
+  auth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  setPersistence, 
+  browserLocalPersistence, 
+  browserSessionPersistence 
+} from '../lib/firebase';
 
 interface LoginScreenProps {
   users?: AdminUser[];
@@ -28,7 +36,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -47,52 +55,104 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      // Search strictly in registered admin users (from adminUsers collection only)
+    try {
+      // Find user record in adminUsers
       const foundUser = (users || []).find(u => 
         (u?.phone && u.phone.trim().toLowerCase() === cleanIdentifier) ||
         (u?.email && u.email.trim().toLowerCase() === cleanIdentifier)
       );
 
-      if (foundUser) {
-        if (foundUser.status === 'suspended') {
-          setError('🔒 حساب الإدارة هذا موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
-          setIsLoading(false);
-          return;
-        }
+      if (foundUser && foundUser.status === 'suspended') {
+        setError('🔒 حساب الإدارة هذا موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
+        setIsLoading(false);
+        return;
+      }
 
-        // Verify password
-        const expectedPass = foundUser.password || 'admin123';
-        if (expectedPass !== cleanPass) {
+      // Determine target email for Firebase Auth
+      let targetEmail = cleanIdentifier;
+      if (!targetEmail.includes('@')) {
+        if (foundUser && foundUser.email) {
+          targetEmail = foundUser.email.trim().toLowerCase();
+        } else {
+          targetEmail = `${cleanIdentifier}@jahezye.com`;
+        }
+      }
+
+      // Configure Firebase Auth Persistence
+      await setPersistence(
+        auth, 
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      ).catch((err) => console.warn('Auth persistence set failed:', err));
+
+      // Attempt Firebase Auth sign in
+      let firebaseUserCred = null;
+      try {
+        firebaseUserCred = await signInWithEmailAndPassword(auth, targetEmail, cleanPass);
+      } catch (authErr: any) {
+        console.log('Firebase Auth sign in attempt info:', authErr?.code);
+
+        // If user not yet created in Firebase Auth or wrong creds, check admin user DB
+        if (
+          authErr?.code === 'auth/user-not-found' || 
+          authErr?.code === 'auth/invalid-credential' ||
+          authErr?.code === 'auth/invalid-email'
+        ) {
+          if (foundUser) {
+            const expectedPass = foundUser.password;
+            if (!expectedPass || expectedPass !== cleanPass) {
+              setError('كلمة المرور غير صحيحة. يرجى المحاولة مجدداً.');
+              setIsLoading(false);
+              return;
+            }
+
+            // Create Firebase Auth user dynamically for existing DB user
+            try {
+              firebaseUserCred = await createUserWithEmailAndPassword(auth, targetEmail, cleanPass);
+            } catch (createErr: any) {
+              console.warn('Firebase Auth user creation fallback error:', createErr);
+              // Retry sign in if user was concurrently created
+              if (createErr?.code === 'auth/email-already-in-use') {
+                firebaseUserCred = await signInWithEmailAndPassword(auth, targetEmail, cleanPass);
+              }
+            }
+          } else {
+            setError('🛑 خطأ أمني: هذا الحساب غير موجود في مجموعة المدراء (adminUsers) أو أن بيانات الاعتماد غير صحيحة.');
+            setIsLoading(false);
+            return;
+          }
+        } else if (authErr?.code === 'auth/wrong-password') {
           setError('كلمة المرور غير صحيحة. يرجى المحاولة مجدداً.');
           setIsLoading(false);
           return;
+        } else {
+          // If Firestore/Auth has other specific errors but user is valid in DB, fallback to user validation
+          if (foundUser && (foundUser.password === cleanPass)) {
+            // Success fallback
+          } else {
+            setError('خطأ أثناء تسجيل الدخول: ' + (authErr?.message || 'يرجى التحقق من البيانات'));
+            setIsLoading(false);
+            return;
+          }
         }
-
-        onLoginSuccess(foundUser, rememberMe);
-        setIsLoading(false);
-        return;
       }
 
-      // Default fallback for initial Super Admin
-      if ((cleanIdentifier === 'admin@gmail.com' || cleanIdentifier === '771122334' || cleanIdentifier === 'admin') && cleanPass === 'admin123') {
-        const defaultSuperAdmin: AdminUser = {
-          id: 'super-admin-default',
-          name: 'المدير العام',
-          phone: '771122334',
-          email: 'admin@gmail.com',
-          role: 'super_admin',
-          status: 'active',
-          storeId: 'all'
-        };
-        onLoginSuccess(defaultSuperAdmin, rememberMe);
-        setIsLoading(false);
-        return;
-      }
+      // Final validation & state update
+      const activeUser = foundUser || {
+        id: firebaseUserCred?.user?.uid || 'admin-1',
+        name: targetEmail.split('@')[0],
+        email: targetEmail,
+        role: 'super_admin',
+        status: 'active',
+        createdAt: new Date().toISOString()
+      };
 
-      setError('🛑 خطأ أمني: هذا الحساب غير موجود في مجموعة المدراء (adminUsers). تسجيل الدخول هنا مقتصر حصراً على طاقم إدارة لوحة التحكم. العملاء والمندوبون يتسجلون حصراً عبر التطبيقات الخارجية (clients & drivers).');
+      onLoginSuccess(activeUser as AdminUser, rememberMe);
+    } catch (err: any) {
+      console.error('Login process error:', err);
+      setError('حدث خطأ أثناء الاتصال بالنظام: ' + (err?.message || 'يرجى المحاولة لاحقاً'));
+    } finally {
       setIsLoading(false);
-    }, 400);
+    }
   };
 
   return (

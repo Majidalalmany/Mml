@@ -27,11 +27,11 @@ import {
   Bike,
   Route,
   Clock,
-  EyeOff
+  EyeOff,
+  Globe
 } from 'lucide-react';
 import L from 'leaflet';
-import { collection, query, where, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { collection, query, where, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, db } from '../lib/firebase';
 import { DriverUser, AdminUser, ActiveDeliveryOrder } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { DedicatedDeliveryMapModal } from './DedicatedDeliveryMapModal';
@@ -45,11 +45,42 @@ export interface DriverLocationPoint {
   timestamp: string;
 }
 
+type FreeTileLayerType = 'osm' | 'voyager' | 'satellite' | 'dark';
+
+const FREE_TILE_LAYERS: Record<FreeTileLayerType, { name: string; url: string; subdomains?: string; maxZoom?: number; attr?: string }> = {
+  voyager: {
+    name: 'شوارع ناصعة',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    maxZoom: 19,
+    attr: '&copy; CARTO &copy; OpenStreetMap contributors'
+  },
+  osm: {
+    name: 'OpenStreetMap',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    maxZoom: 19,
+    attr: '&copy; OpenStreetMap contributors'
+  },
+  satellite: {
+    name: 'أقمار صناعية 🛰️',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 18,
+    attr: '&copy; Esri & OpenStreetMap'
+  },
+  dark: {
+    name: 'ليلي 🌙',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    subdomains: 'abcd',
+    maxZoom: 19,
+    attr: '&copy; CARTO &copy; OpenStreetMap'
+  }
+};
+
 // Sample YEMEN Cities Presets for Quick Map Positioning
 const CITY_PRESETS = [
   { name: 'صنعاء', lat: 15.3694, lng: 44.1910 },
   { name: 'عدن', lat: 12.7855, lng: 45.0187 },
-  { name: 'تعز', lat: 13.5789, latLng: [13.5789, 44.0181], lng: 44.0181 },
+  { name: 'تعز', lat: 13.5789, lng: 44.0181 },
   { name: 'المكلا', lat: 14.5425, lng: 49.1242 },
   { name: 'إب', lat: 13.9667, lng: 44.1833 },
   { name: 'مأرب', lat: 15.4625, lng: 45.3258 },
@@ -219,7 +250,12 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   // Path / Trail Tracking States
   const [activeTrailDriverId, setActiveTrailDriverId] = useState<string | null>(null);
   const [trailPointsCount, setTrailPointsCount] = useState<number>(0);
+  const [activeTrailPoints, setActiveTrailPoints] = useState<DriverLocationPoint[]>([]);
   const [isLoadingTrail, setIsLoadingTrail] = useState<boolean>(false);
+
+  // Free OpenStreetMap & Leaflet Tile Layer State
+  const [tileLayerType, setTileLayerType] = useState<FreeTileLayerType>('voyager');
+  const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
 
   // Active Delivery Route Destination States
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<ActiveDeliveryOrder | null>(null);
@@ -228,6 +264,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   // Map Refs
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const leafletMapRef = useRef<L.Map | null>(null);
+  const activeTileLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef<{ [key: string]: L.Marker }>({});
   const polylineRef = useRef<L.Polyline | null>(null);
   const trailMarkersRef = useRef<L.Marker[]>([]);
@@ -240,6 +277,26 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   const canCreate = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'create');
   const canEdit = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'edit');
   const canDelete = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'delete');
+
+  // Dynamic Tile Layer Switcher for Leaflet (No API Keys required)
+  const switchTileLayer = (layerType: FreeTileLayerType) => {
+    setTileLayerType(layerType);
+    const map = leafletMapRef.current;
+    if (!map) return;
+
+    if (activeTileLayerRef.current) {
+      map.removeLayer(activeTileLayerRef.current);
+    }
+
+    const config = FREE_TILE_LAYERS[layerType];
+    const newLayer = L.tileLayer(config.url, {
+      maxZoom: config.maxZoom || 19,
+      subdomains: config.subdomains || 'abcd',
+      attribution: config.attr || '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    activeTileLayerRef.current = newLayer;
+  };
 
   // Clear Active Delivery Route and Destination Markers from Map
   const clearActiveDeliveryRoute = () => {
@@ -268,6 +325,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     trailMarkersRef.current = [];
     setActiveTrailDriverId(null);
     setTrailPointsCount(0);
+    setActiveTrailPoints([]);
   };
 
   // Draw Active Delivery Route and Destination Marker when clicking an online driver
@@ -498,6 +556,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
       setActiveTrailDriverId(driver.id);
       setTrailPointsCount(recentPoints.length);
+      setActiveTrailPoints(recentPoints);
       setIsLoadingTrail(false);
 
       onShowToast?.(`تم رسم مسار تحركات الكابتن "${driver.name}" خلال آخر ساعتين (${recentPoints.length} نقاط مسجلة)`, 'success');
@@ -547,7 +606,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // 2. Initialize Leaflet Map
+  // 2. Initialize Leaflet Map with OpenStreetMap / CartoDB
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -559,10 +618,15 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         zoomControl: false
       });
 
-      // Standard OSM Tiles
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      // Free Tile Layer (CartoDB Voyager or OSM)
+      const config = FREE_TILE_LAYERS[tileLayerType];
+      const initialLayer = L.tileLayer(config.url, {
+        maxZoom: config.maxZoom || 19,
+        subdomains: config.subdomains || 'abcd',
+        attribution: config.attr || '&copy; OpenStreetMap contributors'
       }).addTo(map);
+
+      activeTileLayerRef.current = initialLayer;
 
       // Add zoom control top-left
       L.control.zoom({ position: 'topleft' }).addTo(map);
@@ -1032,34 +1096,77 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         <div className="lg:col-span-8 bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs flex flex-col relative h-[450px] sm:h-[520px] lg:h-full">
           
           {/* Map Controls Header Bar */}
-          <div className="p-3 bg-slate-900 text-white flex items-center justify-between gap-3 text-xs z-10 border-b border-slate-800 shrink-0">
+          <div className="p-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 text-xs z-10 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-              <span className="font-bold">خريطة اليمن الحية - الإحداثيات المباشرة من Firestore</span>
+              <span className="font-bold">خريطة المندوبين الحية (OpenStreetMap & Leaflet)</span>
               <span className="hidden sm:inline-block text-[10px] text-emerald-400 font-mono bg-slate-800 px-2 py-0.5 rounded border border-emerald-900/50">
-                {statusFilter === 'available' ? 'تُعرض فقط المندوبين المتاحين للإسناد' : `تُعرض (${filteredDrivers.length}) مندوبين`}
+                {statusFilter === 'available' ? 'المتاحين للإسناد' : `(${filteredDrivers.length}) كابتن`}
               </span>
             </div>
 
-            {/* Quick City View Preset Buttons */}
-            <div className="hidden sm:flex items-center gap-1 overflow-x-auto custom-scrollbar max-w-md">
-              <span className="text-[10px] text-slate-400 shrink-0">القفز لمدينة:</span>
-              {CITY_PRESETS.map((city, idx) => (
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Free Tile Layers Selector (No API Key Required) */}
+              <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
                 <button
-                  key={idx}
-                  onClick={() => {
-                    const map = leafletMapRef.current;
-                    if (map) map.flyTo([city.lat, city.lng], 12);
-                  }}
-                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-medium transition-colors cursor-pointer shrink-0"
+                  onClick={() => switchTileLayer('voyager')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    tileLayerType === 'voyager' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="خريطة شوارع ناصعة وعصرية"
                 >
-                  {city.name}
+                  شوارع عصرية
                 </button>
-              ))}
+                <button
+                  onClick={() => switchTileLayer('osm')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    tileLayerType === 'osm' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="خريطة OpenStreetMap الكلاسيكية"
+                >
+                  OSM 🗺️
+                </button>
+                <button
+                  onClick={() => switchTileLayer('satellite')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    tileLayerType === 'satellite' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="أقمار صناعية فضائية بدقة عالية مجانية"
+                >
+                  أقمار صناعية 🛰️
+                </button>
+                <button
+                  onClick={() => switchTileLayer('dark')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    tileLayerType === 'dark' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="الوضع الليلي الداكن"
+                >
+                  ليلي 🌙
+                </button>
+              </div>
+
+              {/* Quick City View Preset Buttons */}
+              <div className="hidden sm:flex items-center gap-1 overflow-x-auto custom-scrollbar max-w-xs">
+                <span className="text-[10px] text-slate-400 shrink-0">المدينة:</span>
+                {CITY_PRESETS.map((city, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setCityCenter({ lat: city.lat, lng: city.lng, zoom: 13 });
+                      const map = leafletMapRef.current;
+                      if (map) map.flyTo([city.lat, city.lng], 13);
+                    }}
+                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-medium transition-colors cursor-pointer shrink-0"
+                  >
+                    {city.name}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Map Canvas */}
+          {/* Map Canvas - Leaflet & OpenStreetMap */}
           <div ref={mapContainerRef} className="w-full flex-1 z-0 bg-slate-100 min-h-0" />
 
           {/* Selected Driver Floating Card Overlay */}
@@ -1189,41 +1296,54 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
-                {canEdit && (
-                  <button
-                    onClick={() => handleToggleOnline(selectedDriver)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
-                      selectedDriver.isOnline ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    }`}
-                  >
-                    {selectedDriver.isOnline ? 'تعيين كـ أوفلاين' : 'تفعيل المتصل'}
-                  </button>
-                )}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                <a
+                  href={`https://www.openstreetmap.org/?mlat=${selectedDriver.lat || 15.3694}&mlon=${selectedDriver.lng || 44.1910}#map=16/${selectedDriver.lat || 15.3694}/${selectedDriver.lng || 44.1910}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs"
+                  title="عرض موقع المندوب في OpenStreetMap"
+                >
+                  <Globe className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>OpenStreetMap 🗺️</span>
+                </a>
 
-                {canEdit && (
-                  <button
-                    onClick={() => handleOpenEditModal(selectedDriver)}
-                    className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold cursor-pointer transition-colors flex items-center gap-1"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>تعديل البيانات</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {canEdit && (
+                    <button
+                      onClick={() => handleToggleOnline(selectedDriver)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                        selectedDriver.isOnline ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {selectedDriver.isOnline ? 'تعيين كـ أوفلاين' : 'تفعيل المتصل'}
+                    </button>
+                  )}
 
-                {canDelete && (
-                  <button
-                    onClick={() => {
-                      handleDeleteDriverSubmit(selectedDriver);
-                      clearDriverPath();
-                      clearActiveDeliveryRoute();
-                    }}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
-                    title="حذف المندوب"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                  {canEdit && (
+                    <button
+                      onClick={() => handleOpenEditModal(selectedDriver)}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold cursor-pointer transition-colors flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>تعديل البيانات</span>
+                    </button>
+                  )}
+
+                  {canDelete && (
+                    <button
+                      onClick={() => {
+                        handleDeleteDriverSubmit(selectedDriver);
+                        clearDriverPath();
+                        clearActiveDeliveryRoute();
+                      }}
+                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                      title="حذف المندوب"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

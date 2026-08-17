@@ -4,7 +4,7 @@ import {
   Tag, 
   Package, 
   Sliders, 
-  Store, 
+  Store as StoreIcon, 
   Gift, 
   Truck, 
   Bell, 
@@ -26,9 +26,9 @@ import {
   PlusCircle,
   FolderPlus
 } from 'lucide-react';
-import { TabType, AdminUser } from '../types';
+import { TabType, AdminUser, Category, Store } from '../types';
 import { hasModulePermission, ROLE_DEFINITIONS } from '../lib/permissions';
-import { SERVICE_CATEGORIES } from '../lib/categoryUtils';
+import { getAllServiceCategories, CategoryVectorIcon } from '../lib/categoryUtils';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -40,10 +40,10 @@ interface SidebarProps {
   setIsOpen: (open: boolean) => void;
   productsCount: number;
   categoriesCount: number;
+  categories?: Category[];
+  stores?: Store[];
   currentUser: AdminUser | null;
 }
-
-
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
@@ -55,21 +55,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsOpen,
   productsCount,
   categoriesCount,
+  categories = [],
+  stores = [],
   currentUser
 }) => {
   const [isServicesExpanded, setIsServicesExpanded] = useState<boolean>(true);
+  const allCategoriesList = getAllServiceCategories(categories, stores);
 
   const allNavItems = [
     { id: 'dashboard' as TabType, label: 'الرئيسية (إحصائيات الموقع)', icon: LayoutDashboard },
-    { id: 'restaurants' as TabType, label: 'المتاجر والخدمات (والأصناف)', icon: Store, count: productsCount, highlight: true, hasSubMenu: true },
-    { id: 'delivery' as TabType, label: '📍 خريطة المندوبين المباشرة', icon: Truck, highlight: true },
+    { id: 'restaurants' as TabType, label: 'المتاجر والخدمات (والأصناف)', icon: StoreIcon, count: allCategoriesList.length, highlight: true, hasSubMenu: true },
+    { id: 'delivery' as TabType, label: 'خريطة المندوبين المباشرة', icon: Truck, highlight: true },
     { id: 'offers' as TabType, label: 'العروض والإعلانات', icon: Gift },
-    { id: 'fazaa' as TabType, label: '🚗 أسطول وطلبات فزعة', icon: Truck },
-    { id: 'customers' as TabType, label: '👥 حسابات عملاء التطبيق', icon: Users },
+    { id: 'fazaa' as TabType, label: 'أسطول وطلبات فزعة', icon: Truck },
+    { id: 'customers' as TabType, label: 'حسابات عملاء التطبيق', icon: Users },
     { id: 'notifications' as TabType, label: 'التنبيهات والإشعارات', icon: Bell },
     { id: 'discounts' as TabType, label: 'التخفيضات والعمولات', icon: Percent },
     { id: 'orders' as TabType, label: 'إدارة الطلبات', icon: ShoppingBag },
-    { id: 'invoices' as TabType, label: '🧾 صور وفواتير المندوبين', icon: FileText, highlight: true },
+    { id: 'invoices' as TabType, label: 'صور وفواتير المندوبين', icon: FileText, highlight: true },
     { id: 'financial' as TabType, label: 'الإدارة المالية', icon: DollarSign },
     { id: 'quality' as TabType, label: 'بيانات العملاء للجودة', icon: Users },
     { id: 'payment' as TabType, label: 'الدفع الإلكتروني', icon: CreditCard },
@@ -192,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {/* Sub-menu Dropdown List */}
                     {isServicesExpanded && (
                       <div className="pr-4 pl-1 pt-1 pb-1 space-y-0.5 border-r-2 border-blue-200 mr-3">
-                        {SERVICE_CATEGORIES.map((sub) => {
+                        {allCategoriesList.map((sub) => {
                           const isSubActive = isActive && (
                             selectedCategoryFilter === sub.id || 
                             selectedCategoryFilter === sub.label ||
@@ -214,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'
                               }`}
                             >
-                              <span className="text-sm shrink-0">{sub.icon}</span>
+                              <CategoryVectorIcon icon={sub.icon} className={`w-4 h-4 shrink-0 ${isSubActive ? 'text-white' : 'text-blue-600'}`} />
                               <span className="truncate flex-1">{sub.label}</span>
                             </button>
                           );

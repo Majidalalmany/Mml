@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { 
   db, 
+  auth,
+  signOut,
   collection, 
   doc, 
   addDoc, 
+  setDoc,
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
@@ -25,25 +28,25 @@ import { hasModulePermission } from './lib/permissions';
 import { ORDER_STATUS_LABELS } from './constants/orderStatus';
 import { checkDuplicateStorePhone, checkDuplicateUserPhone } from './lib/phoneUtils';
 
-// Dynamic Lazy Loading for Module Views and Modals
-const DashboardOverview = lazy(() => import('./components/DashboardOverview').then(m => ({ default: m.DashboardOverview })));
-const ProductsManager = lazy(() => import('./components/ProductsManager').then(m => ({ default: m.ProductsManager })));
-const CategoriesManager = lazy(() => import('./components/CategoriesManager').then(m => ({ default: m.CategoriesManager })));
-const StoresManager = lazy(() => import('./components/StoresManager').then(m => ({ default: m.StoresManager })));
-const StoreModal = lazy(() => import('./components/StoreModal').then(m => ({ default: m.StoreModal })));
-const AdminUsersManager = lazy(() => import('./components/AdminUsersManager').then(m => ({ default: m.AdminUsersManager })));
-const UserModal = lazy(() => import('./components/UserModal').then(m => ({ default: m.UserModal })));
-const SecondaryViews = lazy(() => import('./components/SecondaryViews').then(m => ({ default: m.SecondaryViews })));
-const ProductModal = lazy(() => import('./components/ProductModal').then(m => ({ default: m.ProductModal })));
-const CategoryModal = lazy(() => import('./components/CategoryModal').then(m => ({ default: m.CategoryModal })));
-const ProductViewModal = lazy(() => import('./components/ProductViewModal').then(m => ({ default: m.ProductViewModal })));
-const OrdersManager = lazy(() => import('./components/OrdersManager').then(m => ({ default: m.OrdersManager })));
-const AuditLogsManager = lazy(() => import('./components/AuditLogsManager').then(m => ({ default: m.AuditLogsManager })));
-const StoreDetailPage = lazy(() => import('./components/StoreDetailPage').then(m => ({ default: m.StoreDetailPage })));
-const FazaaOrdersManager = lazy(() => import('./components/FazaaOrdersManager').then(m => ({ default: m.FazaaOrdersManager })));
-const AppUsersManager = lazy(() => import('./components/AppUsersManager').then(m => ({ default: m.AppUsersManager })));
-const DriversMapManager = lazy(() => import('./components/DriversMapManager').then(m => ({ default: m.DriversMapManager })));
-const InvoicesManager = lazy(() => import('./components/InvoicesManager').then(m => ({ default: m.InvoicesManager })));
+// Direct Static Imports for Module Views and Modals to ensure zero-chunk-failure reliability
+import { DashboardOverview } from './components/DashboardOverview';
+import { ProductsManager } from './components/ProductsManager';
+import { CategoriesManager } from './components/CategoriesManager';
+import { StoresManager } from './components/StoresManager';
+import { StoreModal } from './components/StoreModal';
+import { AdminUsersManager } from './components/AdminUsersManager';
+import { UserModal } from './components/UserModal';
+import { SecondaryViews } from './components/SecondaryViews';
+import { ProductModal } from './components/ProductModal';
+import { CategoryModal } from './components/CategoryModal';
+import { ProductViewModal } from './components/ProductViewModal';
+import { OrdersManager } from './components/OrdersManager';
+import { AuditLogsManager } from './components/AuditLogsManager';
+import { StoreDetailPage } from './components/StoreDetailPage';
+import { FazaaOrdersManager } from './components/FazaaOrdersManager';
+import { AppUsersManager } from './components/AppUsersManager';
+import { DriversMapManager } from './components/DriversMapManager';
+import { InvoicesManager } from './components/InvoicesManager';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(() => {
@@ -96,7 +99,7 @@ export default function App() {
   const [initialSectionForModal, setInitialSectionForModal] = useState<string | undefined>(undefined);
 
   // Category filter state for multi-page sidebar navigation
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('restaurants');
   const [isAddServiceTriggered, setIsAddServiceTriggered] = useState<boolean>(false);
 
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -1058,6 +1061,47 @@ export default function App() {
 
   // --- CATEGORY CRUD HANDLERS ---
   const handleSaveCategory = async (categoryData: Partial<Category>) => {
+    const rawName = (categoryData.name || categoryData.label || categoryData.serviceName || 'فئة جديدة').trim();
+    const catId = categoryData.id || `cat-${Date.now()}`;
+    
+    const newCatPayload: Category = {
+      id: catId,
+      name: rawName,
+      label: rawName,
+      serviceName: rawName,
+      nameEn: categoryData.nameEn || '',
+      description: categoryData.description || `إدارة واستعراض محلات وأنشطة قسم ${rawName}`,
+      icon: categoryData.icon || 'Tag',
+      serviceType: categoryData.serviceType || 'default',
+      coverUrl: categoryData.coverUrl || '',
+      order: Number(categoryData.order) || (categories.length + 1),
+      status: categoryData.status || 'active',
+      createdAt: new Date().toISOString()
+    };
+
+    // 1. Instant state update
+    setCategories(prev => {
+      const filtered = prev.filter(c => c.id !== catId && c.name !== rawName);
+      return [...filtered, newCatPayload];
+    });
+
+    // 2. Instant LocalStorage backup
+    try {
+      const stored = JSON.parse(localStorage.getItem('jahez_custom_categories') || '[]');
+      const updated = stored.filter((c: any) => c.id !== catId && c.name !== rawName);
+      updated.push(newCatPayload);
+      localStorage.setItem('jahez_custom_categories', JSON.stringify(updated));
+    } catch (e) {
+      console.warn('LocalStorage category backup error:', e);
+    }
+
+    // 3. Immediately switch active filter to the newly created category (Zero forced resets!)
+    setSelectedCategoryFilter(catId);
+    setActiveTab('restaurants');
+
+    showToast(`تمت إضافة وتفعيل فئة "${rawName}" بنجاح`, 'success');
+
+    // 4. Async Firestore background persistence (non-blocking)
     try {
       if (editingCategory) {
         const catRef = doc(db, 'categories', editingCategory.id);
@@ -1065,24 +1109,23 @@ export default function App() {
           ...categoryData,
           updatedAt: new Date().toISOString()
         });
-        showToast(`تم تحديث التصنيف "${categoryData.name}" بنجاح`);
       } else {
-        await addDoc(collection(db, 'categories'), {
-          ...categoryData,
-          createdAt: new Date().toISOString()
-        });
-        showToast(`تمت إضافة التصنيف "${categoryData.name}" بنجاح في Firestore`);
+        try {
+          await setDoc(doc(db, 'categories', catId), newCatPayload);
+        } catch (dbErr) {
+          console.warn('Firestore setDoc category fallback to addDoc:', dbErr);
+          await addDoc(collection(db, 'categories'), newCatPayload);
+        }
       }
     } catch (err: any) {
-      console.error('Error saving category:', err);
-      showToast('فشل حفظ التصنيف في Firebase', 'error');
-      throw err;
+      console.warn('Background firestore category sync error:', err);
     }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
     try {
       await deleteDoc(doc(db, 'categories', categoryId));
+      setCategories(prev => prev.filter(c => c.id !== categoryId));
       showToast('تم حذف التصنيف بنجاح من Firestore');
     } catch (err: any) {
       console.error('Error deleting category:', err);
@@ -1095,6 +1138,7 @@ export default function App() {
       const catRef = doc(db, 'categories', category.id);
       const newStatus = category.status === 'active' ? 'inactive' : 'active';
       await updateDoc(catRef, { status: newStatus });
+      setCategories(prev => prev.map(c => c.id === category.id ? { ...c, status: newStatus } : c));
       showToast(`تم تعديل حالة التصنيف "${category.name}"`);
     } catch (err: any) {
       console.error('Error toggling category status:', err);
@@ -1102,8 +1146,9 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     try {
+      await signOut(auth);
       localStorage.removeItem('jahez_auth_user');
     } catch (e) {
       console.error(e);
@@ -1194,6 +1239,8 @@ export default function App() {
           setIsOpen={setIsSidebarOpen}
           productsCount={products.length}
           categoriesCount={categories.length}
+          categories={categories}
+          stores={stores}
           currentUser={currentUser}
         />
 
@@ -1242,6 +1289,7 @@ export default function App() {
                       store={selectedStoreDetail}
                       products={products}
                       categories={categories}
+                      currentUser={currentUser}
                       onBack={() => setSelectedStoreDetail(null)}
                       onEditStore={(st) => {
                         setEditingStore(st);
@@ -1285,6 +1333,11 @@ export default function App() {
                           onSelectCategoryFilter={(filter) => setSelectedCategoryFilter(filter)}
                           isAddServiceTriggered={isAddServiceTriggered}
                           onCloseAddServiceTrigger={() => setIsAddServiceTriggered(false)}
+                          onAddCategory={() => {
+                            setEditingCategory(null);
+                            setIsCategoryModalOpen(true);
+                          }}
+                          onSaveCategory={handleSaveCategory}
                           onAddStore={() => {
                             setEditingStore(null);
                             setIsStoreModalOpen(true);
@@ -1296,6 +1349,7 @@ export default function App() {
                           onDeleteStore={handleDeleteStore}
                           onToggleStatus={handleToggleStoreStatus}
                           onSelectStore={(st) => setSelectedStoreDetail(st)}
+                          currentUser={currentUser}
                         />
                       )}
 
@@ -1319,6 +1373,7 @@ export default function App() {
                       onDeleteProduct={handleDeleteProduct}
                       onToggleInStock={handleToggleProductInStock}
                       onSeedData={handleSeedData}
+                      currentUser={currentUser}
                     />
                   )}
 

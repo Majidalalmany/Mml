@@ -253,12 +253,15 @@ export function getAllServiceCategories(
   if (categories && categories.length > 0) {
     for (const cat of categories) {
       const rawLabel = cat.name || cat.label || cat.serviceName || '';
+      const resolvedType = (cat.serviceType === 'restaurant' || cat.serviceType === 'clothing' || cat.serviceType === 'supermarket')
+        ? cat.serviceType
+        : 'default';
       appendCategory(
         cat.id,
         rawLabel,
         cat.icon || 'Tag',
         cat.description,
-        cat.serviceType,
+        resolvedType,
         undefined
       );
     }
@@ -452,7 +455,9 @@ export function getProductFormType(
   // Check Category object in db/state if it explicitly defines serviceType
   const catObj = categories.find(c => c.id === categoryId || normalizeArabicText(c.name) === normName);
   if (catObj && catObj.serviceType) {
-    return catObj.serviceType;
+    if (catObj.serviceType === 'restaurant' || catObj.serviceType === 'clothing' || catObj.serviceType === 'supermarket') {
+      return catObj.serviceType;
+    }
   }
 
   // Exact ID checks for pre-defined services
@@ -508,48 +513,127 @@ export function getProductFormType(
 }
 
 export const CATEGORY_DEFAULT_LOGOS: Record<string, string> = {
-  'المطاعم والوجبات السريعة': 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80',
-  'مطاعم ومقاهي': 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=400&q=80',
-  'الملابس والموضة': 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=400&q=80',
-  'محلات ملابس وموضة': 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=400&q=80',
-  'محلات عصائر ومرطبات': 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80',
-  'الصيدليات والمستلزمات الطبية': 'https://images.unsplash.com/photo-1586015555751-63c3d0c29676?auto=format&fit=crop&w=400&q=80',
-  'السوبرماركت والتموينات': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80',
-  'سوبرماركت وبقالة': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80',
-  'الإلكترونيات والهواتف': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=400&q=80',
-  'إلكترونيات وجوالات': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=400&q=80',
-  'البهارات والمكسرات والقهوة': 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=400&q=80',
-  'بهارات وعطارة': 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=400&q=80',
-  'الورود والهدايا': 'https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=400&q=80',
-  'الحلويات والمخبوزات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=400&q=80',
-  'مخابز وحلويات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=400&q=80',
-  'اللحوم والأسماك الطازجة': 'https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=400&q=80',
-  'محلات الحقائب والأحذية': 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=400&q=80'
+  'المطاعم والوجبات السريعة': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
+  'مطاعم ومقاهي': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
+  'المطاعم': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
+  'مشاريع منزلية': 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
+  'الملابس والموضة': 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=600&q=80',
+  'محلات ملابس وموضة': 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=600&q=80',
+  'محلات عصائر ومرطبات': 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=600&q=80',
+  'آيس كريم وعصائر': 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=600&q=80',
+  'الصيدليات والمستلزمات الطبية': 'https://images.unsplash.com/photo-1586015555751-63c3d0c29676?auto=format&fit=crop&w=600&q=80',
+  'صيدليات ومستلزمات طبية': 'https://images.unsplash.com/photo-1586015555751-63c3d0c29676?auto=format&fit=crop&w=600&q=80',
+  'السوبرماركت والتموينات': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
+  'سوبرماركت وبقالة': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
+  'السوبر ماركت': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
+  'الإلكترونيات والهواتف': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=600&q=80',
+  'إلكترونيات وجوالات': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=600&q=80',
+  'البهارات والمكسرات والقهوة': 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=600&q=80',
+  'بهارات وعطارة': 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=600&q=80',
+  'الورود والهدايا': 'https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=600&q=80',
+  'عطور ومستحضرات تجميل': 'https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=600&q=80',
+  'الحلويات والمخبوزات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80',
+  'مخابز وحلويات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80',
+  'اللحوم والأسماك الطازجة': 'https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=600&q=80',
+  'محلات الحقائب والأحذية': 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80'
 };
 
-export const DEFAULT_STORE_LOGO = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=400&q=80';
+export const CATEGORY_DEFAULT_SUBTITLES: Record<string, string> = {
+  'المطاعم': 'أشهى الأطباق من مطاعمك المفضلة',
+  'مطاعم ومقاهي': 'أشهى الأطباق من مطاعمك المفضلة',
+  'المطاعم والوجبات السريعة': 'أشهى الأطباق من مطاعمك المفضلة',
+  'مشاريع منزلية': 'أكل بيتي بطعم الحب والمذاق',
+  'السوبر ماركت': 'كل احتياجاتك من مكان واحد',
+  'سوبرماركت وبقالة': 'كل احتياجاتك من مكان واحد',
+  'السوبرماركت والتموينات': 'كل احتياجاتك من مكان واحد',
+  'آيس كريم وعصائر': 'انتعاش ولذة في كل لحظة',
+  'محلات عصائر ومرطبات': 'انتعاش ولذة في كل لحظة',
+  'صيدليات ومستلزمات طبية': 'رعاية صحية وتوصيل علاجي آمن',
+  'الصيدليات والمستلزمات الطبية': 'رعاية صحية وتوصيل علاجي آمن',
+  'محلات ملابس وموضة': 'أحدث صيحات الموضة والأزياء الراقية',
+  'الملابس والموضة': 'أحدث صيحات الموضة والأزياء الراقية',
+  'إلكترونيات وجوالات': 'أجهزة ذكية وملحقات أصلية',
+  'عطور ومستحضرات تجميل': 'أرقى العطور ومستحضرات الجمال',
+  'مخابز وحلويات': 'مخبوزات طازجة وحلويات مميزة',
+  'بهارات وعطارة': 'توابل يمنية أصيلة ونكهات تراثية',
+  'محلات الحقائب والأحذية': 'أحدث موديلات الحقائب والأحذية الجلدية'
+};
+
+export const DEFAULT_STORE_LOGO = 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80';
+export const DEFAULT_CATEGORY_BANNER = 'https://images.unsplash.com/photo-1526367790999-0150786686a2?auto=format&fit=crop&w=1200&q=80';
+
+export function getCategoryImageUrl(
+  category?: Partial<Category> | null,
+  categoryName?: string,
+  categories: Category[] = []
+): string {
+  if (category) {
+    if (category.imageUrl && category.imageUrl.trim()) return category.imageUrl.trim();
+    if (category.categoryImageUrl && category.categoryImageUrl.trim()) return category.categoryImageUrl.trim();
+    if (category.category_image_url && category.category_image_url.trim()) return category.category_image_url.trim();
+    if (category.coverUrl && category.coverUrl.trim()) return category.coverUrl.trim();
+  }
+
+  const name = (category?.name || categoryName || '').trim();
+  if (name && CATEGORY_DEFAULT_LOGOS[name]) {
+    return CATEGORY_DEFAULT_LOGOS[name];
+  }
+
+  // Keyword lookup
+  const norm = normalizeArabicText(name).toLowerCase();
+  if (norm.includes('مطعم') || norm.includes('برجر') || norm.includes('وجب')) {
+    return 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('منزل') || norm.includes('بيتي') || norm.includes('طبخ')) {
+    return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('سوبر') || norm.includes('بقال') || norm.includes('تموين')) {
+    return 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('عصير') || norm.includes('ايس كريم') || norm.includes('مرطب')) {
+    return 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('صيدل') || norm.includes('دواء') || norm.includes('طب')) {
+    return 'https://images.unsplash.com/photo-1586015555751-63c3d0c29676?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('ملابس') || norm.includes('ازياء') || norm.includes('فاشن')) {
+    return 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=600&q=80';
+  }
+  if (norm.includes('الكترون') || norm.includes('جوال') || norm.includes('هاتف')) {
+    return 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=600&q=80';
+  }
+
+  return DEFAULT_STORE_LOGO;
+}
+
+export function getCategorySubtitle(
+  category?: Partial<Category> | null,
+  categoryName?: string
+): string {
+  if (category?.subtitle && category.subtitle.trim()) {
+    return category.subtitle.trim();
+  }
+  if (category?.description && category.description.trim()) {
+    // If description is short, use it
+    if (category.description.length <= 40) return category.description.trim();
+  }
+  const name = (category?.name || categoryName || '').trim();
+  if (name && CATEGORY_DEFAULT_SUBTITLES[name]) {
+    return CATEGORY_DEFAULT_SUBTITLES[name];
+  }
+  const norm = normalizeArabicText(name).toLowerCase();
+  if (norm.includes('مطعم') || norm.includes('برجر')) return 'أشهى الأطباق من مطاعمك المفضلة';
+  if (norm.includes('منزل') || norm.includes('بيتي')) return 'أكل بيتي بطعم الحب والمذاق';
+  if (norm.includes('سوبر') || norm.includes('بقال')) return 'كل احتياجاتك من مكان واحد';
+  if (norm.includes('عصير') || norm.includes('ايس')) return 'انتعاش ولذة في كل لحظة';
+  return 'خدمات متميزة وتوصيل سريع';
+}
 
 export function getCategoryDefaultLogo(
   categoryId?: string,
   categoryName?: string,
   categories: Category[] = []
 ): string {
-  const servDef = findServiceCategory(categoryId, categories) || findServiceCategory(categoryName, categories);
-  if (servDef && CATEGORY_DEFAULT_LOGOS[servDef.label]) {
-    return CATEGORY_DEFAULT_LOGOS[servDef.label];
-  }
-
   const category = categories.find(c => c.id === categoryId || c.name === categoryName);
-  if (category) {
-    if (category.coverUrl) return category.coverUrl;
-    if (CATEGORY_DEFAULT_LOGOS[category.name]) {
-      return CATEGORY_DEFAULT_LOGOS[category.name];
-    }
-  }
-
-  if (categoryName && CATEGORY_DEFAULT_LOGOS[categoryName]) {
-    return CATEGORY_DEFAULT_LOGOS[categoryName];
-  }
-
-  return DEFAULT_STORE_LOGO;
+  return getCategoryImageUrl(category, categoryName, categories);
 }

@@ -24,11 +24,12 @@ import {
   Activity,
   Plus,
   PlusCircle,
-  FolderPlus
+  FolderPlus,
+  Layers
 } from 'lucide-react';
 import { TabType, AdminUser, Category, Store } from '../types';
 import { hasModulePermission, ROLE_DEFINITIONS } from '../lib/permissions';
-import { getAllServiceCategories, CategoryVectorIcon } from '../lib/categoryUtils';
+import { getAllServiceCategories, getCategoryImageUrl } from '../lib/categoryUtils';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -64,7 +65,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const allNavItems = [
     { id: 'dashboard' as TabType, label: 'الرئيسية (إحصائيات الموقع)', icon: LayoutDashboard },
-    { id: 'restaurants' as TabType, label: 'المتاجر والخدمات (والأصناف)', icon: StoreIcon, count: allCategoriesList.length, highlight: true, hasSubMenu: true },
+    { id: 'categories' as TabType, label: 'إدارة الفئات والخدمات', icon: Layers, count: categories.length, highlight: true },
+    { id: 'restaurants' as TabType, label: 'المتاجر والأنشطة التجارية', icon: StoreIcon, count: stores.length, hasSubMenu: true },
     { id: 'delivery' as TabType, label: 'خريطة المندوبين المباشرة', icon: Truck, highlight: true },
     { id: 'offers' as TabType, label: 'العروض والإعلانات', icon: Gift },
     { id: 'fazaa' as TabType, label: 'أسطول وطلبات فزعة', icon: Truck },
@@ -217,7 +219,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'
                               }`}
                             >
-                              <CategoryVectorIcon icon={sub.icon} className={`w-4 h-4 shrink-0 ${isSubActive ? 'text-white' : 'text-blue-600'}`} />
+                              <img 
+                                src={getCategoryImageUrl(sub, sub.label)} 
+                                alt={sub.label} 
+                                className="w-5 h-5 rounded-md object-cover shrink-0 border border-gray-200" 
+                                referrerPolicy="no-referrer"
+                              />
                               <span className="truncate flex-1">{sub.label}</span>
                             </button>
                           );

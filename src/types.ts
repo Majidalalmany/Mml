@@ -4,15 +4,26 @@ export interface Category {
   nameEn?: string;
   label?: string;
   serviceName?: string;
+  subtitle?: string; // e.g. "أشهى الأطباق من مطاعمك المفضلة"
   icon?: string;
-  coverUrl?: string;
+  imageUrl?: string; // Category representative image URL
+  category_image_url?: string; // alias for API / user specification
+  categoryImageUrl?: string; // camelCase alias
+  bannerUrl?: string; // Top Slider Banner Image URL
+  banner_image_url?: string; // alias for API / user specification
+  bannerImageUrl?: string; // camelCase alias
+  coverUrl?: string; // fallback
+  ctaText?: string; // e.g. "اطلب الآن" or "اطلب منفعة الآن"
   order: number;
   status: 'active' | 'inactive';
+  isActive?: boolean;
   description?: string;
   productCount?: number;
   storeCount?: number;
-  serviceType?: 'restaurant' | 'clothing' | 'supermarket' | 'default';
+  serviceType?: 'delivery' | 'field_service' | 'restaurant' | 'clothing' | 'supermarket' | 'default';
+  serviceTypeCategory?: 'delivery' | 'field_service'; // نوع الخدمة: توصيل / خدمة ميدانية
   createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface DaySchedule {
@@ -424,6 +435,7 @@ export interface ManfaaOrder extends FazaaOrder {}
 
 export type TabType = 
   | 'dashboard' 
+  | 'app_preview'
   | 'categories' 
   | 'products' 
   | 'modifiers' 

@@ -29,7 +29,7 @@ import {
   FolderPlus
 } from 'lucide-react';
 import { Store, Category, Product, AdminUser } from '../types';
-import { getCategoryDefaultLogo, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES, getAllServiceCategories, CategoryVectorIcon, resolveCategoryIconKey } from '../lib/categoryUtils';
+import { getCategoryDefaultLogo, getCategoryImageUrl, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES, getAllServiceCategories, resolveCategoryIconKey } from '../lib/categoryUtils';
 import { hasModulePermission } from '../lib/permissions';
 
 interface StoresManagerProps {
@@ -41,6 +41,7 @@ interface StoresManagerProps {
   onSelectCategoryFilter?: (filter: string) => void;
   isAddServiceTriggered?: boolean;
   onCloseAddServiceTrigger?: () => void;
+  onNavigateToCategories?: () => void;
   onAddCategory?: () => void;
   onSaveCategory?: (categoryData: Partial<Category>) => Promise<void> | void;
   onAddStore: () => void;
@@ -58,6 +59,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   isLoading,
   selectedCategoryFilter,
   onSelectCategoryFilter,
+  onNavigateToCategories,
   isAddServiceTriggered,
   onCloseAddServiceTrigger,
   onAddCategory,
@@ -197,8 +199,13 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
       <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-              <CategoryVectorIcon icon={activeServiceDef?.icon} className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0 shadow-2xs">
+              <img 
+                src={getCategoryImageUrl(activeServiceDef, activeServiceDef?.label)} 
+                alt={activeServiceDef?.label}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <h2 className="text-xl font-bold text-slate-900">
               {activeServiceDef ? activeServiceDef.label : selectedService}
@@ -213,14 +220,30 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {onNavigateToCategories && (
+            <button
+              onClick={onNavigateToCategories}
+              className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              <Layers className="w-4 h-4 text-blue-600" />
+              <span>صفحة إدارة الفئات والخدمات</span>
+            </button>
+          )}
+
           {canCreate && (
             <>
               <button
-                onClick={() => setIsAddServiceModalOpen(true)}
+                onClick={() => {
+                  if (onAddCategory) {
+                    onAddCategory();
+                  } else {
+                    setIsAddServiceModalOpen(true);
+                  }
+                }}
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
               >
                 <FolderPlus className="w-4 h-4 text-amber-400" />
-                <span>+ إضافة فئة خدمة جديدة</span>
+                <span>+ إضافة فئة خدمة بالصور</span>
               </button>
 
               <button
@@ -256,7 +279,12 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                     : 'bg-white text-slate-700 border-gray-200 hover:bg-gray-50'
                 }`}
               >
-                <CategoryVectorIcon icon={cat.icon} className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-blue-600'}`} />
+                <img 
+                  src={getCategoryImageUrl(cat, cat.label)} 
+                  alt={cat.label} 
+                  className="w-4 h-4 rounded-md object-cover shrink-0 border border-gray-200" 
+                  referrerPolicy="no-referrer"
+                />
                 <span>{cat.label}</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-sans font-semibold ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-slate-600'}`}>
                   {count}
@@ -607,33 +635,38 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  أيقونة الفئة (Vector Icon):
+                  رابط صورة الفئة التعبيرية (Category Image URL):
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <input
+                  type="url"
+                  value={newServiceIcon.startsWith('http') ? newServiceIcon : ''}
+                  onChange={(e) => setNewServiceIcon(e.target.value)}
+                  placeholder="https://images.unsplash.com/... (أو اختر من النماذج الجاهزة أدناه)"
+                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 mb-2"
+                />
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
-                    { id: 'Briefcase', label: 'حقائب' },
-                    { id: 'Footprints', label: 'أحذية' },
-                    { id: 'Shirt', label: 'ملابس' },
-                    { id: 'ShoppingBag', label: 'بقالة' },
-                    { id: 'UtensilsCrossed', label: 'مطاعم' },
-                    { id: 'Pill', label: 'صيدلية' },
-                    { id: 'Tv', label: 'إلكترونيات' },
-                    { id: 'Sparkles', label: 'عطور' },
-                    { id: 'Flame', label: 'بهارات' },
-                    { id: 'Tag', label: 'عام' }
-                  ].map((item) => (
+                    { label: 'حقائب وأحذية', img: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'ملابس وأزياء', img: 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'مطاعم ومأكولات', img: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'سوبرماركت', img: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'إلكترونيات', img: 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'عطور وتجميل', img: 'https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'بهارات وتوابل', img: 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=400&q=80' },
+                    { label: 'عصائر ومرطبات', img: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80' }
+                  ].map((item, idx) => (
                     <button
-                      key={item.id}
+                      key={idx}
                       type="button"
-                      onClick={() => setNewServiceIcon(item.id)}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                        newServiceIcon === item.id 
-                          ? 'bg-blue-600 text-white border-blue-600' 
+                      onClick={() => setNewServiceIcon(item.img)}
+                      className={`flex items-center gap-1.5 p-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-right ${
+                        newServiceIcon === item.img 
+                          ? 'bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500' 
                           : 'bg-gray-50 text-slate-700 border-gray-200 hover:bg-gray-100'
                       }`}
                     >
-                      <CategoryVectorIcon icon={item.id} className="w-3.5 h-3.5" />
-                      <span>{item.label}</span>
+                      <img src={item.img} alt={item.label} className="w-6 h-6 rounded-md object-cover shrink-0" referrerPolicy="no-referrer" />
+                      <span className="truncate text-[11px]">{item.label}</span>
                     </button>
                   ))}
                 </div>

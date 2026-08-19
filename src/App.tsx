@@ -1063,6 +1063,8 @@ export default function App() {
   const handleSaveCategory = async (categoryData: Partial<Category>) => {
     const rawName = (categoryData.name || categoryData.label || categoryData.serviceName || 'فئة جديدة').trim();
     const catId = categoryData.id || `cat-${Date.now()}`;
+    const imgUrl = categoryData.imageUrl || categoryData.categoryImageUrl || categoryData.category_image_url || categoryData.coverUrl || '';
+    const banUrl = categoryData.bannerUrl || categoryData.bannerImageUrl || categoryData.banner_image_url || '';
     
     const newCatPayload: Category = {
       id: catId,
@@ -1070,13 +1072,27 @@ export default function App() {
       label: rawName,
       serviceName: rawName,
       nameEn: categoryData.nameEn || '',
+      subtitle: categoryData.subtitle || '',
       description: categoryData.description || `إدارة واستعراض محلات وأنشطة قسم ${rawName}`,
       icon: categoryData.icon || 'Tag',
       serviceType: categoryData.serviceType || 'default',
-      coverUrl: categoryData.coverUrl || '',
+      serviceTypeCategory: categoryData.serviceTypeCategory || 'delivery',
+      
+      imageUrl: imgUrl,
+      categoryImageUrl: imgUrl,
+      category_image_url: imgUrl,
+      coverUrl: imgUrl,
+      
+      bannerUrl: banUrl,
+      bannerImageUrl: banUrl,
+      banner_image_url: banUrl,
+      
       order: Number(categoryData.order) || (categories.length + 1),
       status: categoryData.status || 'active',
-      createdAt: new Date().toISOString()
+      isActive: categoryData.isActive !== false,
+      ctaText: categoryData.ctaText || 'اطلب الآن',
+      createdAt: categoryData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     // 1. Instant state update
@@ -1095,18 +1111,16 @@ export default function App() {
       console.warn('LocalStorage category backup error:', e);
     }
 
-    // 3. Immediately switch active filter to the newly created category (Zero forced resets!)
+    // 3. Immediately switch active filter
     setSelectedCategoryFilter(catId);
-    setActiveTab('restaurants');
-
-    showToast(`تمت إضافة وتفعيل فئة "${rawName}" بنجاح`, 'success');
+    showToast(`تمت إضافة وتحديث نشاط "${rawName}" بنجاح في لوحة التحكم وتطبيق العميل`, 'success');
 
     // 4. Async Firestore background persistence (non-blocking)
     try {
       if (editingCategory) {
         const catRef = doc(db, 'categories', editingCategory.id);
         await updateDoc(catRef, {
-          ...categoryData,
+          ...newCatPayload,
           updatedAt: new Date().toISOString()
         });
       } else {
@@ -1322,7 +1336,33 @@ export default function App() {
                         />
                       )}
 
-                      {/* Stores & Restaurants View */}
+                      {/* 2. Dedicated Categories & Services Management View (صفحة إدارة الفئات والخدمات المنفصلة) */}
+                      {activeTab === 'categories' && (
+                        <CategoriesManager 
+                          categories={categories}
+                          stores={stores}
+                          products={products}
+                          isLoading={isLoadingCategories}
+                          onAddCategory={() => {
+                            setEditingCategory(null);
+                            setIsCategoryModalOpen(true);
+                          }}
+                          onEditCategory={(cat) => {
+                            setEditingCategory(cat);
+                            setIsCategoryModalOpen(true);
+                          }}
+                          onDeleteCategory={handleDeleteCategory}
+                          onToggleStatus={handleToggleCategoryStatus}
+                          onSeedData={handleSeedData}
+                          onNavigateToStores={(categoryId) => {
+                            if (categoryId) setSelectedCategoryFilter(categoryId);
+                            setActiveTab('restaurants');
+                          }}
+                          currentUser={currentUser}
+                        />
+                      )}
+
+                      {/* 2b. Stores & Restaurants View */}
                       {activeTab === 'restaurants' && (
                         <StoresManager 
                           stores={stores}
@@ -1331,6 +1371,7 @@ export default function App() {
                           isLoading={isLoadingStores}
                           selectedCategoryFilter={selectedCategoryFilter}
                           onSelectCategoryFilter={(filter) => setSelectedCategoryFilter(filter)}
+                          onNavigateToCategories={() => setActiveTab('categories')}
                           isAddServiceTriggered={isAddServiceTriggered}
                           onCloseAddServiceTrigger={() => setIsAddServiceTriggered(false)}
                           onAddCategory={() => {
@@ -1461,6 +1502,7 @@ export default function App() {
 
                   {/* 10. Secondary / Specialized Views */}
                   {activeTab !== 'dashboard' && 
+                   activeTab !== 'categories' && 
                    activeTab !== 'restaurants' && 
                    activeTab !== 'products' && 
                    activeTab !== 'admin' && 

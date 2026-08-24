@@ -191,7 +191,8 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
     if (isInstant) {
       total = total * expressMultiplier;
     }
-    return Math.round(total);
+    // Enforce Minimum Delivery Fee for Fazaa / Manfaah of at least 700 YER
+    return Math.max(700, Math.round(total));
   };
 
   const handleCreateOrderSubmit = async (e: React.FormEvent) => {

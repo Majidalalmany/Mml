@@ -35,6 +35,7 @@ import { collection, query, where, getDocs, onSnapshot, addDoc, updateDoc, delet
 import { DriverUser, AdminUser, ActiveDeliveryOrder } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { DedicatedDeliveryMapModal } from './DedicatedDeliveryMapModal';
+import { getLocalVehicles } from '../lib/vehicleService';
 
 export interface DriverLocationPoint {
   id?: string;
@@ -340,6 +341,21 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     // Resolve active order or generate realistic order destination
     let order = driver.activeOrder;
     if (!order && (driver.assignedOrdersCount || 0) > 0) {
+      const roadDistKm = 3.6; // Realistic distance e.g. 3.6 km
+      const localVehicles = getLocalVehicles();
+      const isTruck = driver.vehicleType?.includes('شاحنة') || driver.vehicleType?.includes('دينا') || driver.vehicleType === 'Truck';
+      const isCar = driver.vehicleType?.includes('سيارة') || driver.vehicleType?.includes('باص') || driver.vehicleType === 'Car';
+      const matchedVehicle = isTruck 
+        ? (localVehicles.find(v => v.id === 'veh-truck') || localVehicles[2])
+        : isCar
+        ? (localVehicles.find(v => v.id === 'veh-car') || localVehicles[1])
+        : (localVehicles.find(v => v.id === 'veh-motorcycle') || localVehicles[0]);
+
+      const pricePerKm = matchedVehicle?.pricePerKm || 100;
+      const minFee = matchedVehicle?.minDeliveryFee || 500;
+      const calculatedDistanceCost = Math.round(roadDistKm * pricePerKm);
+      const deliveryFee = Math.max(minFee, calculatedDistanceCost);
+      const itemsCost = 2500;
       order = {
         id: `ord-${driver.id}-${Date.now()}`,
         orderNumber: `FZ-${Math.floor(1000 + Math.random() * 8999)}`,
@@ -352,10 +368,13 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         destLng: driverLng + 0.016,
         pickupLat: driverLat - 0.005,
         pickupLng: driverLng - 0.005,
-        fee: 1500,
+        fee: deliveryFee,
+        totalAmount: itemsCost + deliveryFee,
+        itemsTotal: itemsCost,
         status: 'delivering',
-        estimatedMinutes: 14,
-        distanceKm: 3.6
+        estimatedMinutes: Math.round(roadDistKm * 3.5),
+        distanceKm: roadDistKm,
+        actualRoadDistanceKm: roadDistKm
       };
     }
 
@@ -1217,8 +1236,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
               {/* Active Delivery Specific Destination Section */}
               {selectedDriver.isOnline && activeDeliveryOrder && (
-                <div className="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-3 rounded-xl shadow-xs">
-                  <div className="flex items-center justify-between text-xs font-bold text-amber-900 mb-2 pb-1.5 border-b border-amber-200/70">
+                <div className="mb-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-3 rounded-xl shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-900 pb-1.5 border-b border-amber-200/70">
                     <div className="flex items-center gap-1.5">
                       <span className="relative flex h-2.5 w-2.5">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -1229,6 +1248,28 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                     <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-mono font-bold">
                       ⏱️ {activeDeliveryOrder.estimatedMinutes || 12} دقيقة
                     </span>
+                  </div>
+
+                  {/* Financial & Distance Metrics Row */}
+                  <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
+                    <div className="bg-white/90 p-1.5 rounded-lg border border-amber-200/60">
+                      <span className="text-[9px] text-slate-500 block">المسافة الكلية</span>
+                      <strong className="text-blue-700 font-mono text-[11px]">
+                        {activeDeliveryOrder.actualRoadDistanceKm || activeDeliveryOrder.distanceKm || 3.8} كم
+                      </strong>
+                    </div>
+                    <div className="bg-white/90 p-1.5 rounded-lg border border-amber-200/60">
+                      <span className="text-[9px] text-slate-500 block">رسوم التوصيل</span>
+                      <strong className="text-amber-800 font-mono text-[11px]">
+                        {(activeDeliveryOrder.fee || 1200).toLocaleString()} ر.ي
+                      </strong>
+                    </div>
+                    <div className="bg-emerald-50 p-1.5 rounded-lg border border-emerald-200">
+                      <span className="text-[9px] text-emerald-800 block">المبلغ الإجمالي</span>
+                      <strong className="text-emerald-700 font-mono text-[11px]">
+                        {(activeDeliveryOrder.totalAmount || (activeDeliveryOrder.fee || 1200) + 3500).toLocaleString()} ر.ي
+                      </strong>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-700">
@@ -1269,7 +1310,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                     className="w-full mt-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
                   >
                     <Navigation className="w-4 h-4 text-amber-200 animate-pulse" />
-                    <span>فتح خريطة التتبع المستقلة للعميل والمسار 🚀</span>
+                    <span>فتح خريطة التتبع المستقلة وتفاصيل الرحلة 🚀</span>
                   </button>
                 </div>
               )}

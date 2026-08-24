@@ -28,12 +28,32 @@ import {
   Smartphone,
   Navigation,
   UserCheck,
-  Camera
+  Camera,
+  Bike,
+  Car,
+  ClipboardCheck,
+  Sparkles,
+  Calculator,
+  Sliders,
+  Scale,
+  Zap
 } from 'lucide-react';
-import { Order, OrderStatus, Store, AdminUser, DriverUser } from '../types';
+import { Order, OrderStatus, Store, AdminUser, DriverUser, VehicleType } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
 import { db, collection, addDoc, onSnapshot, query } from '../lib/firebase';
+import { 
+  getLocalVehicles, 
+  findVehicleType, 
+  suggestVehicleForOrder, 
+  getLocalPricingSettings,
+  calculateOrderEstimatedWeight,
+  suggestVehicleByWeight,
+  getVehicleRecommendationInfo
+} from '../lib/vehicleService';
+import { calculateRoadDistance, calculateDeliveryCost, estimateRoadDistanceByAddress, computeLiveRoadDistance } from '../lib/routingService';
+import { TestOrderModal } from './TestOrderModal';
+import { DistanceVerificationModal } from './DistanceVerificationModal';
 
 export { ORDER_STATUS_CONFIG };
 
@@ -122,8 +142,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [invoiceImagePreview, setInvoiceImagePreview] = useState<string | null>(null);
   const [isSubmittingInvoice, setIsSubmittingInvoice] = useState(false);
 
+  // Admin Order Review & Vehicle Assignment Modal State (واجهة مراجعة واعتماد الطلبات بالإدارة)
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [orderToReview, setOrderToReview] = useState<Order | null>(null);
+  const [reviewVehicleId, setReviewVehicleId] = useState<string>('veh-motorcycle');
+  const [reviewWeightKg, setReviewWeightKg] = useState<number>(1.5);
+  const [reviewDistanceKm, setReviewDistanceKm] = useState<number>(3.5);
+  const [reviewNotes, setReviewNotes] = useState<string>('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [vehiclesList, setVehiclesList] = useState<VehicleType[]>(() => getLocalVehicles());
+  const [pricingSettings] = useState(() => getLocalPricingSettings());
+
   // New manual order modal state
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [isTestOrderModalOpen, setIsTestOrderModalOpen] = useState(false);
+  const [verificationOrder, setVerificationOrder] = useState<Partial<Order> | null>(null);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('771234567');
   const [newStoreId, setNewStoreId] = useState('');
@@ -147,6 +180,103 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   const safeOrders = orders || [];
   const safeStores = stores || [];
+
+  // Open Review Modal and compute initial road distance, weight & suggested vehicle
+  const handleOpenReviewModal = async (order: Order) => {
+    setOrderToReview(order);
+    
+    // Refresh latest vehicle pricing configuration from storage
+    const freshVehicles = getLocalVehicles();
+    const freshPricing = getLocalPricingSettings();
+    setVehiclesList(freshVehicles);
+
+    // 1. Calculate Estimated Weight based on order items or category
+    const estimatedWeight = order.approvedWeightKg || order.estimatedWeightKg || calculateOrderEstimatedWeight(order);
+    setReviewWeightKg(estimatedWeight);
+
+    // 2. Suggest vehicle automatically based on weight capacity
+    const suggestedVehicle = suggestVehicleByWeight(estimatedWeight, freshVehicles);
+    setReviewVehicleId(order.suggestedVehicleId || order.vehicleTypeId || suggestedVehicle.id);
+
+    // 3. Calculate actual road network distance
+    const estimatedDistance = estimateRoadDistanceByAddress(
+      order.storeName || 'صنعاء - شارع حدة',
+      order.address || 'صنعاء - ميدان التحرير',
+      freshPricing.roadCurvatureFactor || 1.38
+    );
+    setReviewDistanceKm(order.actualRoadDistanceKm || estimatedDistance || 3.5);
+    setReviewNotes(order.adminReviewNotes || '');
+    setIsReviewModalOpen(true);
+
+    // Async live road calculation
+    try {
+      const liveRoute = await computeLiveRoadDistance(
+        order.storeName || 'صنعاء - شارع حدة',
+        order.address || 'صنعاء - ميدان التحرير',
+        suggestedVehicle.icon === 'Bike' ? 'TWO_WHEELER' : 'DRIVE',
+        freshPricing.roadCurvatureFactor || 1.38
+      );
+      if (liveRoute && liveRoute.distanceKm) {
+        setReviewDistanceKm(liveRoute.distanceKm);
+      }
+    } catch (e) {
+      console.warn('Error fetching live road distance:', e);
+    }
+  };
+
+  // Submit Admin Review & Approve Order
+  const handleApproveOrderReview = async () => {
+    if (!orderToReview) return;
+    try {
+      setIsSubmittingReview(true);
+      const selectedVehicle = findVehicleType(reviewVehicleId, vehiclesList);
+      
+      // Calculate realistic delivery cost based on road distance and chosen vehicle
+      const calcResult = calculateDeliveryCost({
+        roadDistanceKm: reviewDistanceKm,
+        vehicle: selectedVehicle,
+        serviceType: orderToReview.serviceType === 'fazaa' ? 'manfaah' : 'regular',
+        pricingSettings
+      });
+
+      // Calculate items subtotal
+      const itemsSubtotal = orderToReview.items && orderToReview.items.length > 0
+        ? orderToReview.items.reduce((sum, it) => sum + (it.price * it.quantity), 0)
+        : (orderToReview.subtotal || Math.max(0, (orderToReview.total || 1500) - (orderToReview.deliveryFee || 500)));
+
+      const finalTotal = itemsSubtotal + calcResult.finalDeliveryFee;
+      const nowIso = new Date().toISOString();
+
+      await onUpdateOrderStatus(orderToReview.id, 'preparing', {
+        status: 'preparing',
+        needsAdminReview: false,
+        reviewedByAdmin: true,
+        reviewedByAdminName: currentUser?.name || 'مسؤول الإدارة',
+        reviewedAt: nowIso,
+        approvedWeightKg: reviewWeightKg,
+        estimatedWeightKg: orderToReview.estimatedWeightKg || reviewWeightKg,
+        vehicleTypeId: selectedVehicle.id,
+        vehicleTypeName: selectedVehicle.name,
+        suggestedVehicleId: selectedVehicle.id,
+        suggestedVehicleName: selectedVehicle.name,
+        actualRoadDistanceKm: calcResult.actualRoadDistanceKm,
+        deliveryFee: calcResult.finalDeliveryFee,
+        subtotal: itemsSubtotal,
+        total: finalTotal,
+        totalPrice: finalTotal,
+        routingMethod: calcResult.routingMethod || 'road_network_topology',
+        adminReviewNotes: reviewNotes.trim() || undefined
+      });
+
+      setIsReviewModalOpen(false);
+      setOrderToReview(null);
+    } catch (err) {
+      console.error('Failed to approve order review:', err);
+      alert('حدث خطأ أثناء اعتماد الطلب، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   // Firestore Realtime Drivers Listener
   useEffect(() => {
@@ -186,7 +316,11 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     return safeOrders.filter((order) => {
       // Status filter
       if (selectedStatusTab !== 'all') {
-        if (order.status !== selectedStatusTab) return false;
+        if (selectedStatusTab === 'pending_review') {
+          if (order.status !== 'pending_review' && order.status !== 'PENDING_REVIEW' && !order.needsAdminReview) return false;
+        } else if (order.status !== selectedStatusTab) {
+          return false;
+        }
       }
 
       // Store filter
@@ -238,8 +372,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const counts = useMemo(() => {
     return {
       all: safeOrders.length,
-      new: safeOrders.filter(o => o.status === 'new').length,
-      preparing: safeOrders.filter(o => o.status === 'preparing').length,
+      pending_review: safeOrders.filter(o => o.status === 'pending_review' || o.status === 'PENDING_REVIEW' || o.needsAdminReview).length,
+      new: safeOrders.filter(o => o.status === 'new' && !o.needsAdminReview).length,
+      preparing: safeOrders.filter(o => o.status === 'preparing' || o.status === 'approved' || o.status === 'APPROVED').length,
       delivering: safeOrders.filter(o => o.status === 'delivering').length,
       delivered: safeOrders.filter(o => o.status === 'delivered').length,
       cancelled: safeOrders.filter(o => o.status === 'cancelled').length,
@@ -454,13 +589,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           </button>
 
           {canEditOrders && (
-            <button
-              onClick={() => setIsNewOrderModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>طلب جديد</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsTestOrderModalOpen(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all shadow-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+                title="إنشاء طلب تجريبي وتحديد الإحداثيات وحساب التكلفة فورياً"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                <span>+ طلب تجريبي واحتساب فوري ⚡</span>
+              </button>
+
+              <button
+                onClick={() => setIsNewOrderModalOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>طلب جديد</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -469,7 +615,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       {activeViewMode === 'admin' && (
         <>
           {/* Quick Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             <button
               onClick={() => setSelectedStatusTab('all')}
               className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
@@ -486,6 +632,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             </button>
 
             <button
+              onClick={() => setSelectedStatusTab('pending_review')}
+              className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
+                selectedStatusTab === 'pending_review'
+                  ? 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-500/20'
+                  : 'bg-amber-50/70 border-amber-300 hover:border-amber-400'
+              }`}
+            >
+              <div className={`flex items-center justify-between text-xs font-bold mb-1 ${selectedStatusTab === 'pending_review' ? 'text-white' : 'text-amber-800'}`}>
+                <span>مراجعة الوسيلة 🚗</span>
+                <Sliders className="w-4 h-4" />
+              </div>
+              <span className={`text-2xl font-extrabold font-sans ${selectedStatusTab === 'pending_review' ? 'text-white' : 'text-amber-950'}`}>{counts.pending_review}</span>
+            </button>
+
+            <button
               onClick={() => setSelectedStatusTab('new')}
               className={`p-3.5 rounded-xl border text-right transition-all shadow-2xs ${
                 selectedStatusTab === 'new'
@@ -494,7 +655,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               }`}
             >
               <div className="flex items-center justify-between text-amber-700 mb-1">
-                <span className="text-xs font-bold">جديدة (بانتظار التأكيد)</span>
+                <span>جديدة (تأكيد)</span>
                 <Clock className="w-4 h-4" />
               </div>
               <span className="text-2xl font-extrabold text-amber-900 font-sans">{counts.new}</span>
@@ -509,7 +670,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               }`}
             >
               <div className="flex items-center justify-between text-blue-700 mb-1">
-                <span className="text-xs font-bold">قيد التحضير (محدد مندوب)</span>
+                <span className="text-xs font-bold">قيد التحضير</span>
                 <Utensils className="w-4 h-4" />
               </div>
               <span className="text-2xl font-extrabold text-blue-900 font-sans">{counts.preparing}</span>
@@ -554,7 +715,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               }`}
             >
               <div className="flex items-center justify-between text-red-700 mb-1">
-                <span className="text-xs font-bold">ملغاة عبر الإدارة</span>
+                <span className="text-xs font-bold">ملغاة</span>
                 <XCircle className="w-4 h-4" />
               </div>
               <span className="text-2xl font-extrabold text-red-900 font-sans">{counts.cancelled}</span>
@@ -567,6 +728,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-gray-100 custom-scrollbar">
               {[
                 { id: 'all', label: `جميع الطلبات (${counts.all})` },
+                { id: 'pending_review', label: `🔍 مراجعة واعتماد الوسيلة (${counts.pending_review})` },
                 { id: 'new', label: `الجديدة (${counts.new})` },
                 { id: 'preparing', label: `قيد التحضير (${counts.preparing})` },
                 { id: 'delivering', label: `قيد التوصيل (${counts.delivering})` },
@@ -795,6 +957,78 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                         </div>
                       )}
 
+                      {/* Real-world Road Distance & Map Verification Button (Requirement 2) */}
+                      <div className="flex items-center justify-between bg-blue-50/80 p-2.5 rounded-xl border border-blue-200 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <Navigation className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span className="text-slate-700 font-medium">المسافة الطرقية:</span>
+                          <strong className="font-mono text-blue-900 font-extrabold text-xs">
+                            {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم` : '3.5 كم'}
+                          </strong>
+                          {order.airDistanceKm && (
+                            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                              ({order.airDistanceKm} كم خط هوائي)
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setVerificationOrder(order)}
+                          className="bg-white hover:bg-blue-600 hover:text-white text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs cursor-pointer shrink-0"
+                          title="معاينة مسار الشوارع الفعلي ونقطتي المتجر والعميل ومطابقة المسافة"
+                        >
+                          <MapPin className="w-3 h-3 text-blue-500 hover:text-white" />
+                          <span>📍 معاينة النقطتين على الخريطة</span>
+                        </button>
+                      </div>
+
+                      {/* Review & Vehicle Assignment Prominent Banner */}
+                      {(order.needsAdminReview || rawStatus === 'pending_review' || order.status === 'PENDING_REVIEW') && (
+                        <div className="bg-amber-50 border border-amber-300 p-3 rounded-xl text-xs space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                              <Sliders className="w-4 h-4 text-amber-600 animate-pulse" />
+                              <span>طلب بانتظار مراجعة المنتجات واعتماد وسيلة النقل</span>
+                            </span>
+                            <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-bold">
+                              مراجعة الإدارة
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-amber-800">
+                            يتطلب هذا الطلب مراجعة الأصناف واختيار وسيلة النقل الملائمة لحساب تكلفة التوصيل الواقعية بدقة قبل التأكيد.
+                          </p>
+                          {canEditOrders && (
+                            <button
+                              onClick={() => handleOpenReviewModal(order)}
+                              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                            >
+                              <ClipboardCheck className="w-4 h-4" />
+                              <span>مراجعة الطلب واختيار وسيلة النقل واعتماد السعر 🚗</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Admin Approved Vehicle Badge */}
+                      {order.reviewedByAdmin && (
+                        <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-emerald-900 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>تم اعتماد وسيلة النقل: {order.vehicleTypeName || 'دراجة نارية'}</span>
+                            </span>
+                            <span className="font-mono font-bold text-emerald-800">
+                              {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم مسار فعلي` : ''}
+                            </span>
+                          </div>
+                          <div className="text-emerald-700 text-[10px]">
+                            تكلفة التوصيل المعتمدة: <strong>{(order.deliveryFee || 500).toLocaleString()} ر.ي</strong>
+                            {order.adminReviewNotes && ` • ملاحظة: ${order.adminReviewNotes}`}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Cancellation Policy Badge */}
                       <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] flex items-center justify-between">
                         <span className="font-bold text-slate-700">صلاحية الإلغاء:</span>
@@ -807,7 +1041,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       {/* Admin Workflow Actions */}
                       {canEditOrders && (
                         <div className="pt-1 flex flex-wrap gap-1.5">
-                          {rawStatus === 'new' && (
+                          {rawStatus === 'new' && !order.needsAdminReview && (
                             <button
                               onClick={() => {
                                 setOrderToAssign(order);
@@ -821,6 +1055,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                           )}
 
                           <button
+                            onClick={() => handleOpenReviewModal(order)}
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-[11px] py-2 px-2.5 rounded-xl transition-all flex items-center justify-center gap-1 border border-amber-300 cursor-pointer"
+                            title="مراجعة وتعديل وسيلة النقل والتسعير"
+                          >
+                            <Sliders className="w-3.5 h-3.5 text-amber-700" />
+                            <span>مراجعة الوسيلة</span>
+                          </button>
+
+                          <button
                             onClick={() => {
                               setOrderToAssign(order);
                               setIsAssignDriverModalOpen(true);
@@ -832,7 +1075,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                             <span>تغيير الكابتن</span>
                           </button>
 
-                          {rawStatus === 'new' && canCancelOrders && (
+                          {canCancelOrders && (
                             <button
                               onClick={() => handleStatusChange(order.id, 'cancelled')}
                               className="bg-red-50 hover:bg-red-100 text-red-700 font-bold text-[11px] py-2 px-2.5 rounded-xl border border-red-200 cursor-pointer"
@@ -1282,6 +1525,344 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         </div>
       )}
 
+      {/* ==================== MODAL 1.5: ADMIN ORDER REVIEW & VEHICLE ASSIGNMENT MODAL ==================== */}
+      {isReviewModalOpen && orderToReview && (() => {
+        const selectedVehicle = findVehicleType(reviewVehicleId, vehiclesList);
+        const calc = calculateDeliveryCost({
+          roadDistanceKm: reviewDistanceKm,
+          vehicle: selectedVehicle,
+          serviceType: 'regular',
+          pricingSettings
+        });
+        const itemsSubtotal = orderToReview.items && orderToReview.items.length > 0
+          ? orderToReview.items.reduce((sum, it) => sum + (it.price * it.quantity), 0)
+          : (orderToReview.subtotal || Math.max(0, (orderToReview.total || 1500) - (orderToReview.deliveryFee || 500)));
+        const finalGrandTotal = itemsSubtotal + calc.finalDeliveryFee;
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-200 overflow-hidden max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold">
+                    🚗
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold">مراجعة أصناف الطلب واعتماد وسيلة النقل والتسعير</h3>
+                    <p className="text-[11px] text-slate-300">
+                      الطلب {orderToReview.orderNumber || `#${orderToReview.id.slice(0, 6)}`} • {orderToReview.storeName || 'المتجر'}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsReviewModalOpen(false);
+                    setOrderToReview(null);
+                  }}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Scrollable Modal Body */}
+              <div className="p-5 space-y-5 overflow-y-auto custom-scrollbar text-xs">
+                {/* Customer & Store Info */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                    <span className="text-[11px] font-bold text-slate-500 block">بيانات العميل:</span>
+                    <p className="font-bold text-slate-900 text-xs">{orderToReview.customerName}</p>
+                    <p className="text-slate-600 font-mono text-[11px]">{orderToReview.customerPhone}</p>
+                    <p className="text-slate-500 text-[11px] line-clamp-1">{orderToReview.address || 'العنوان غير محدد بدقة'}</p>
+                  </div>
+
+                  <div className="bg-blue-50/60 p-3 rounded-xl border border-blue-200 space-y-1">
+                    <span className="text-[11px] font-bold text-blue-700 block">المتجر / الفرع:</span>
+                    <p className="font-bold text-blue-950 text-xs">{orderToReview.storeName || 'متجر معتمد'}</p>
+                    <p className="text-blue-800 text-[11px]">طريقة الدفع: {orderToReview.paymentMethod === 'jawali' ? 'محفظة جوالي / إلكتروني' : orderToReview.paymentMethod === 'card' ? 'بطاقة بنكية' : 'الدفع عند الاستلام (كاش)'}</p>
+                    {orderToReview.notes && (
+                      <p className="text-amber-800 text-[10px] bg-amber-100/60 px-2 py-0.5 rounded">ملاحظة: {orderToReview.notes}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Items & Quantities Review Table */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <ShoppingBag className="w-4 h-4 text-blue-600" />
+                      <span>مراجعة المنتجات والكميات المطلوبة ({orderToReview.items?.length || 1}):</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-blue-700 font-mono">
+                      إجمالي الأصناف: {itemsSubtotal.toLocaleString()} ر.ي
+                    </span>
+                  </div>
+
+                  <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100 bg-white">
+                    {orderToReview.items && orderToReview.items.length > 0 ? (
+                      orderToReview.items.map((it, idx) => (
+                        <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-slate-50/50">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 font-bold text-[11px] flex items-center justify-center">
+                              {it.quantity}x
+                            </span>
+                            <div>
+                              <p className="font-bold text-slate-800 text-xs">{it.productName}</p>
+                              {it.options && it.options.length > 0 && (
+                                <p className="text-[10px] text-slate-400">{it.options.join(' • ')}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-left font-mono">
+                            <span className="font-bold text-slate-900">{(it.price * it.quantity).toLocaleString()} ر.ي</span>
+                            <span className="text-[10px] text-slate-400 block">({it.price} ر.ي/قطعة)</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-3 text-slate-500">تفاصيل الأصناف مرتبطة بقائمة المتجر.</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Weight Review & Automatic Capacity Upgrade Section */}
+                <div className="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Scale className="w-4 h-4 text-amber-700" />
+                      <span>مراجعة واحتساب وزن الطلب (سعة الحمولة):</span>
+                    </span>
+                    <span className="text-[10px] bg-amber-200/80 text-amber-950 font-bold px-2 py-0.5 rounded font-mono">
+                      تقدير تلقائي ذكي
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number"
+                        step="0.5"
+                        min="0.1"
+                        value={reviewWeightKg}
+                        onChange={(e) => {
+                          const w = Math.max(0.1, Number(e.target.value) || 1);
+                          setReviewWeightKg(w);
+                          const suggested = suggestVehicleByWeight(w, vehiclesList);
+                          setReviewVehicleId(suggested.id);
+                        }}
+                        className="w-24 px-3 py-1.5 rounded-xl border border-amber-300 font-mono font-bold text-center bg-white focus:ring-2 focus:ring-amber-500"
+                      />
+                      <span className="font-bold text-slate-700">كجم (KG)</span>
+                    </div>
+
+                    {/* Quick increment buttons */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[1, 5, 15, 50, 120].map(wVal => (
+                        <button
+                          key={wVal}
+                          type="button"
+                          onClick={() => {
+                            setReviewWeightKg(wVal);
+                            const suggested = suggestVehicleByWeight(wVal, vehiclesList);
+                            setReviewVehicleId(suggested.id);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                            reviewWeightKg === wVal 
+                              ? 'bg-amber-600 text-white border-amber-600' 
+                              : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100'
+                          }`}
+                        >
+                          {wVal} كجم
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Weight Auto-Recommendation Feedback */}
+                  {(() => {
+                    const rec = getVehicleRecommendationInfo(reviewWeightKg, selectedVehicle, vehiclesList);
+                    if (rec.isUpgraded) {
+                      return (
+                        <div className="bg-white/80 p-2 rounded-lg border border-amber-300 text-[11px] text-amber-900 font-medium flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>{rec.message}</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <p className="text-[10px] text-slate-500">
+                        سعة الحمولة: الدراجة حتى 15 كجم • السيارة من 15-100 كجم • الشاحنة لأكثر من 100 كجم
+                      </p>
+                    );
+                  })()}
+                </div>
+
+                {/* Road Routing Distance Config */}
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Navigation className="w-4 h-4 text-emerald-600" />
+                      <span>المسافة الطرقية الواقعية (Road Network Distance):</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setVerificationOrder(orderToReview)}
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                      <span>📍 معاينة النقطتين على الخريطة</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 flex items-center gap-2">
+                      <input 
+                        type="number"
+                        step="0.1"
+                        min="0.5"
+                        value={reviewDistanceKm}
+                        onChange={(e) => setReviewDistanceKm(Math.max(0.5, Number(e.target.value) || 1))}
+                        className="w-24 px-3 py-1.5 rounded-xl border border-gray-300 font-mono font-bold text-center bg-white focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="font-bold text-slate-700">كيلومتر (كم)</span>
+                    </div>
+                    <span className="text-[11px] text-slate-500">
+                      محسوبة بناءً على شبكة الشوارع والانعطافات بدلاً من المسافة الهوائية
+                    </span>
+                  </div>
+                </div>
+
+                {/* Vehicle Selection Grid */}
+                <div className="space-y-2">
+                  <label className="font-bold text-slate-800 text-xs block">
+                    اختر نوع وسيلة النقل المناسبة لحجم ووزن هذا الطلب:
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {vehiclesList.filter(v => v.isActive).map((veh) => {
+                      const isSelected = reviewVehicleId === veh.id;
+                      const isMotorcycle = veh.name.includes('دراجة') || veh.icon === 'Bike';
+                      const isCar = veh.name.includes('سيارة') || veh.icon === 'Car';
+                      const isTruck = veh.name.includes('شاحنة') || veh.icon === 'Truck';
+
+                      return (
+                        <div
+                          key={veh.id}
+                          onClick={() => setReviewVehicleId(veh.id)}
+                          className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                            isSelected 
+                              ? 'border-blue-600 bg-blue-50/50 shadow-xs' 
+                              : 'border-gray-200 bg-white hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-base ${
+                              isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {isMotorcycle ? '🏍️' : isCar ? '🚗' : '🚚'}
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-900 text-xs leading-tight">{veh.name}</p>
+                              <span className="text-[10px] text-slate-400">{veh.maxVolumeDescription || 'حسب الأسطول'}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-gray-100 text-[11px] space-y-0.5">
+                            <div className="flex justify-between text-slate-600">
+                              <span>سعر الكيلو:</span>
+                              <strong className="font-mono text-blue-700">{veh.pricePerKm} ر.ي/كم</strong>
+                            </div>
+                            <div className="flex justify-between text-slate-600">
+                              <span>الحد الأدنى:</span>
+                              <strong className="font-mono text-amber-700">{veh.minDeliveryFee} ر.ي</strong>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Calculation Breakdown Box */}
+                <div className="bg-slate-900 text-white p-4 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-xs flex items-center gap-1.5">
+                      <Calculator className="w-4 h-4 text-emerald-400" />
+                      <span>تفاصيل التسعير النهائي المعتمد:</span>
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                      calc.minApplied ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}>
+                      {calc.minApplied ? 'تم تطبيق الحد الأدنى المعتمد 📌' : 'حساب مباشر حسب الكيلومترات ✅'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-slate-800 p-2 rounded-lg">
+                      <span className="text-[10px] text-slate-400 block">إجمالي المنتجات</span>
+                      <strong className="font-mono text-slate-100 text-sm mt-0.5 block">{itemsSubtotal.toLocaleString()} ر.ي</strong>
+                    </div>
+
+                    <div className="bg-slate-800 p-2 rounded-lg">
+                      <span className="text-[10px] text-blue-300 block">رسوم التوصيل ({selectedVehicle.name})</span>
+                      <strong className="font-mono text-blue-300 text-sm mt-0.5 block">{calc.finalDeliveryFee.toLocaleString()} ر.ي</strong>
+                    </div>
+
+                    <div className="bg-emerald-950/80 border border-emerald-500/40 p-2 rounded-lg">
+                      <span className="text-[10px] text-emerald-300 block">الإجمالي الكلي النهائي</span>
+                      <strong className="font-mono text-emerald-400 text-base mt-0.5 block">{finalGrandTotal.toLocaleString()} ر.ي</strong>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 font-mono text-center pt-1">
+                    {calc.calculationBreakdown}
+                  </p>
+                </div>
+
+                {/* Admin Notes */}
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1 text-xs">
+                    ملاحظات الإدارة للطلب (تظهر للمندوب والعميل):
+                  </label>
+                  <input 
+                    type="text"
+                    value={reviewNotes}
+                    onChange={(e) => setReviewNotes(e.target.value)}
+                    placeholder="مثال: تم اختيار سيارة لتوصيل كراتين السوبرماركت بأمان..."
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs bg-gray-50 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 bg-slate-50 border-t border-gray-100 flex items-center justify-between gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReviewModalOpen(false);
+                    setOrderToReview(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-gray-200 font-bold transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isSubmittingReview}
+                  onClick={handleApproveOrderReview}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingReview ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <span>اعتماد وسيلة النقل وإرسال الموافقة للعميل 🚀</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ==================== MODAL 2: INVOICE IMAGE UPLOAD MODAL ==================== */}
       {isInvoiceModalOpen && orderForInvoice && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
@@ -1641,6 +2222,28 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* ==================== MODAL 3: TEST ORDER MODAL (Requirement 1) ==================== */}
+      {isTestOrderModalOpen && (
+        <TestOrderModal
+          isOpen={isTestOrderModalOpen}
+          onClose={() => setIsTestOrderModalOpen(false)}
+          onAddOrder={async (newOrderData) => {
+            if (onCreateOrder) {
+              await onCreateOrder(newOrderData);
+            }
+          }}
+        />
+      )}
+
+      {/* ==================== MODAL 4: DISTANCE & ROUTING VERIFICATION MODAL (Requirement 2) ==================== */}
+      {verificationOrder && (
+        <DistanceVerificationModal
+          isOpen={!!verificationOrder}
+          onClose={() => setVerificationOrder(null)}
+          order={verificationOrder}
+        />
       )}
     </div>
   );

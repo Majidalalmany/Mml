@@ -1,6 +1,6 @@
 {
   "name": "لوحة تحكم إدارة المتجات والتصنيفات",
-  "description": "لوحة تحكم إدارية متكاملة لإدارة المنتجات، التصنيفات، الطلبات والعروض مع ربط مباشر بـ Firebase Firestore",
+  "description": "لوحة تحكم إدارية متكاملة لإدارة المنتجات، التصنيفات، الطلبات، وتسعير وسائط النقل المتعددة مع محرك احتساب المسافات الطرقية والتحقق الجغرافي",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

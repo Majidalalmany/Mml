@@ -1,10 +1,14 @@
 import { OrderStatus } from '../types';
-import { Clock, Utensils, Truck, CheckCircle2, XCircle, RotateCcw } from 'lucide-react';
+import { Clock, Utensils, Truck, CheckCircle2, XCircle, RotateCcw, ClipboardCheck, CheckCheck } from 'lucide-react';
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  PENDING_REVIEW: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
+  pending_review: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
+  APPROVED: 'تمت الموافقة وتأكيد تكلفة التوصيل',
+  approved: 'تمت الموافقة وتأكيد تكلفة التوصيل',
   NEW: 'طلب جديد',
-  PREPARING: 'قيد التحضير',
-  DELIVERING: 'قيد التوصيل',
+  PREPARING: 'قيد التحضير والتجهيز',
+  DELIVERING: 'قيد التوصيل مع الكابتن',
   COMPLETED: 'تم الاستلام (مكتمل)',
   CANCELLED: 'تم الإلغاء',
   new: 'طلب جديد',
@@ -23,6 +27,38 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
   borderColor: string;
   Icon: any;
 }> = {
+  PENDING_REVIEW: {
+    label: 'قيد المراجعة وتحديد وسيلة النقل',
+    badgeClass: 'bg-orange-100 text-orange-950 border-orange-300',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
+    borderColor: 'border-orange-300',
+    Icon: ClipboardCheck
+  },
+  pending_review: {
+    label: 'قيد المراجعة وتحديد وسيلة النقل',
+    badgeClass: 'bg-orange-100 text-orange-950 border-orange-300',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
+    borderColor: 'border-orange-300',
+    Icon: ClipboardCheck
+  },
+  APPROVED: {
+    label: 'معتمد / بانتظار التحضير',
+    badgeClass: 'bg-teal-100 text-teal-950 border-teal-300',
+    iconBg: 'bg-teal-50',
+    iconColor: 'text-teal-600',
+    borderColor: 'border-teal-300',
+    Icon: CheckCheck
+  },
+  approved: {
+    label: 'معتمد / بانتظار التحضير',
+    badgeClass: 'bg-teal-100 text-teal-950 border-teal-300',
+    iconBg: 'bg-teal-50',
+    iconColor: 'text-teal-600',
+    borderColor: 'border-teal-300',
+    Icon: CheckCheck
+  },
   NEW: {
     label: 'طلب جديد (NEW)',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',

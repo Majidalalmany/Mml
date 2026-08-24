@@ -15,10 +15,15 @@ import {
   Bike,
   Layers,
   Zap,
-  Globe
+  Globe,
+  Receipt,
+  DollarSign,
+  Route,
+  PackageCheck
 } from 'lucide-react';
 import L from 'leaflet';
 import { DriverUser, ActiveDeliveryOrder } from '../types';
+import { getLocalVehicles } from '../lib/vehicleService';
 
 interface DedicatedDeliveryMapModalProps {
   isOpen: boolean;
@@ -209,7 +214,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
       routePoints.push([destLat, destLng]);
 
       const polyline = L.polyline(routePoints, {
-        color: '#2563eb',
+        color: '#f59e0b',
         weight: 6,
         opacity: 0.9,
         dashArray: '10, 8'
@@ -235,12 +240,25 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
   const destLat = order.destLat || (driverLat + 0.015);
   const destLng = order.destLng || (driverLng + 0.015);
 
-  const dropoffTextAddress = order.dropoffAddress || order.deliveryAddress || 'صنعاء - اليمن';
-  
-  // Free OpenStreetMap Direction & External Browser URL (no API key required)
+  const roadDist = order.actualRoadDistanceKm || order.distanceKm || 3.6;
+  const localVehicles = getLocalVehicles();
+  const isTruck = driver.vehicleType?.includes('شاحنة') || driver.vehicleType?.includes('دينا') || driver.vehicleType === 'Truck';
+  const isCar = driver.vehicleType?.includes('سيارة') || driver.vehicleType?.includes('باص') || driver.vehicleType === 'Car';
+  const matchedVehicle = isTruck 
+    ? (localVehicles.find(v => v.id === 'veh-truck') || localVehicles[2])
+    : isCar
+    ? (localVehicles.find(v => v.id === 'veh-car') || localVehicles[1])
+    : (localVehicles.find(v => v.id === 'veh-motorcycle') || localVehicles[0]);
+
+  const pricePerKm = matchedVehicle?.pricePerKm || 100;
+  const minFee = matchedVehicle?.minDeliveryFee || 500;
+  const dynamicCalculatedFee = Math.max(minFee, Math.round(roadDist * pricePerKm));
+  const deliveryFee = order.fee || dynamicCalculatedFee;
+  const totalOrderAmount = order.totalAmount || (deliveryFee + (order.itemsTotal || 2500));
+
+  // Free OpenStreetMap Direction & External Browser URL
   const osmDirectionsUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${driverLat}%2C${driverLng}%3B${destLat}%2C${destLng}`;
   const googleMapsWebUrl = `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${destLat},${destLng}&travelmode=driving`;
-
   const whatsappUrl = `https://wa.me/967${order.customerPhone}?text=${encodeURIComponent(`حياك الله أخي ${order.customerName}، نود إبلاغك بأن الكابتن ${driver.name} في طريقه إليك لتسليم الطلب رقم #${order.orderNumber}`)}`;
 
   return (
@@ -250,21 +268,21 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
         {/* Modal Header */}
         <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-lg shrink-0">
-              🗺️
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-bold text-lg shrink-0">
+              🚚
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="font-extrabold text-base sm:text-lg text-white">
-                  خريطة التتبع المباشر (OpenStreetMap & Leaflet) - الطلب #{order.orderNumber}
+                  تفاصيل المشوار والطلب المباشر - #{order.orderNumber}
                 </h2>
-                <span className="hidden sm:inline-flex bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2.5 py-0.5 rounded-full font-bold items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  مباشر ومجاني 100%
+                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                  المندوب في طريق التسليم
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                تتبع مسار الكابتن <strong className="text-amber-300">{driver.name}</strong> نحو العميل <strong className="text-emerald-300">{order.customerName}</strong>
+                الكابتن المكلف: <strong className="text-amber-300">{driver.name}</strong> ➔ العميل المستلم: <strong className="text-emerald-300">{order.customerName}</strong>
               </p>
             </div>
           </div>
@@ -278,7 +296,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
               title="فتح مسار التوجيه في OpenStreetMap"
             >
               <Globe className="w-4 h-4 text-emerald-200" />
-              <span className="hidden md:inline">مسار OpenStreetMap</span>
+              <span className="hidden md:inline">OpenStreetMap 🗺️</span>
               <ExternalLink className="w-3.5 h-3.5 opacity-80" />
             </a>
 
@@ -292,11 +310,11 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
           </div>
         </div>
 
-        {/* Modal Main Content (Map + Info Sidebar) */}
+        {/* Modal Main Content (Map + Detailed Info Sidebar) */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden bg-slate-50">
           
-          {/* Map View Area (8 cols on desktop) */}
-          <div className="lg:col-span-8 relative h-[320px] sm:h-[400px] lg:h-full flex flex-col bg-slate-100">
+          {/* Map View Area (7 cols on desktop) */}
+          <div className="lg:col-span-7 relative h-[300px] sm:h-[380px] lg:h-full flex flex-col bg-slate-100 border-l border-slate-200">
             
             {/* Top Bar Floating Status & Free Layer Switcher */}
             <div className="absolute top-3 right-3 left-3 z-[400] bg-slate-900/90 text-white backdrop-blur-md p-2.5 sm:p-3 rounded-xl shadow-xl border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -333,11 +351,6 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
                     أقمار صناعية 🛰️
                   </button>
                 </div>
-
-                <div className="flex items-center gap-2 font-mono font-bold text-slate-200 shrink-0 text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
-                  <span>⏱️ {order.estimatedMinutes || 12} د</span>
-                  <span>📏 {order.distanceKm || 3.5} كم</span>
-                </div>
               </div>
             </div>
 
@@ -361,23 +374,72 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
             </div>
           </div>
 
-          {/* Detailed Order & Driver Info Sidebar (4 cols on desktop) */}
-          <div className="lg:col-span-4 p-4 sm:p-5 overflow-y-auto custom-scrollbar flex flex-col gap-4 bg-white border-r border-slate-200">
+          {/* Detailed Financial & Order Info Sidebar (5 cols on desktop) */}
+          <div className="lg:col-span-5 p-4 sm:p-5 overflow-y-auto custom-scrollbar flex flex-col gap-4 bg-white">
             
-            {/* Customer Details Box */}
+            {/* 1. FINANCIAL & DISTANCE SUMMARY CARD (Requested by user) */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 rounded-2xl shadow-md space-y-3.5 border border-slate-700">
+              <div className="flex items-center justify-between border-b border-slate-700/80 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-emerald-400" />
+                  <h3 className="font-extrabold text-sm text-white">البيانات المالية ومسافة الرحلة الكلية</h3>
+                </div>
+                <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  حساب دقيق بالكيلومتر
+                </span>
+              </div>
+
+              {/* 3 Metrics Cards */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {/* Total Road Distance */}
+                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                  <span className="text-[10px] text-slate-400 block mb-1">المسافة الكلية للرحلة</span>
+                  <div className="text-base font-black font-mono text-blue-300 flex items-center justify-center gap-1">
+                    <Route className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{roadDist} كم</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 block mt-0.5">طرقية واقعية</span>
+                </div>
+
+                {/* Delivery Fee */}
+                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
+                  <span className="text-[10px] text-slate-400 block mb-1">رسوم التوصيل</span>
+                  <div className="text-base font-black font-mono text-amber-300">
+                    {deliveryFee.toLocaleString()} <span className="text-[10px] font-normal">ر.ي</span>
+                  </div>
+                  <span className="text-[9px] text-amber-400/80 block mt-0.5">أجرة الكابتن</span>
+                </div>
+
+                {/* Total Final Amount */}
+                <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-500/40">
+                  <span className="text-[10px] text-emerald-300 block mb-1">المبلغ الإجمالي</span>
+                  <div className="text-base font-black font-mono text-emerald-400">
+                    {totalOrderAmount.toLocaleString()} <span className="text-[10px] font-normal">ر.ي</span>
+                  </div>
+                  <span className="text-[9px] text-emerald-300/80 block mt-0.5">المستحق من العميل</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-800/60 px-3 py-1.5 rounded-xl">
+                <span>⏱️ الوقت التقديري للوصول: <strong className="text-amber-300 font-bold">{order.estimatedMinutes || 14} دقيقة</strong></span>
+                <span>🛵 وسيلة النقل: <strong className="text-slate-100">{driver.vehicleType || 'دراجة نارية'}</strong></span>
+              </div>
+            </div>
+
+            {/* 2. Customer Details Box */}
             <div className="bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-200 p-4 rounded-xl shadow-xs space-y-3">
               <div className="flex items-center justify-between text-xs font-bold text-rose-950 border-b border-rose-200 pb-2">
                 <div className="flex items-center gap-1.5">
                   <User className="w-4 h-4 text-rose-600" />
-                  <span>تفاصيل العميل والوجهة</span>
+                  <span>تفاصيل العميل والوجهة المحددة</span>
                 </div>
                 <span className="bg-rose-200/80 text-rose-900 text-[10px] px-2 py-0.5 rounded font-mono font-bold">
-                  عميل مباشر
+                  طلب #{order.orderNumber}
                 </span>
               </div>
 
               <div>
-                <div className="text-xs text-slate-500">اسم العميل المستلم:</div>
+                <div className="text-[11px] text-slate-500">اسم العميل المستلم:</div>
                 <div className="text-sm font-extrabold text-slate-900">{order.customerName}</div>
               </div>
 
@@ -387,7 +449,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                 >
                   <Phone className="w-3.5 h-3.5" />
-                  <span>اتصال تلفوني ({order.customerPhone})</span>
+                  <span>اتصال بالعميل ({order.customerPhone})</span>
                 </a>
 
                 <a
@@ -405,13 +467,13 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
               <div className="bg-white p-3 rounded-lg border border-rose-100 space-y-1">
                 <div className="text-[11px] text-rose-600 font-bold flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  <span>عنوان التوصيل بالتفصيل:</span>
+                  <span>عنوان التسليم بالتحديد:</span>
                 </div>
                 <div className="text-xs text-slate-800 font-bold leading-relaxed">{order.dropoffAddress}</div>
               </div>
             </div>
 
-            {/* Pickup Store Details Box */}
+            {/* 3. Pickup Store Details Box */}
             <div className="bg-amber-50/70 border border-amber-200 p-4 rounded-xl shadow-xs space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 border-b border-amber-200 pb-2">
                 <Store className="w-4 h-4 text-amber-600" />
@@ -420,7 +482,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
 
               <div className="text-xs text-slate-800">
                 <span className="text-slate-500">المتجر: </span>
-                <strong className="text-amber-900 font-bold">{order.storeName || 'غير محدد'}</strong>
+                <strong className="text-amber-900 font-bold">{order.storeName || 'مركز خدمة فزعة المباشر'}</strong>
               </div>
 
               <div className="text-xs text-slate-700 bg-white/80 p-2.5 rounded-lg border border-amber-100">
@@ -429,15 +491,15 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
               </div>
             </div>
 
-            {/* Driver Profile Box */}
+            {/* 4. Driver Profile Box */}
             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
               <div className="flex items-center justify-between text-xs font-bold text-slate-800 border-b border-slate-200 pb-2">
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  <span>بيانات الكابتن المسؤول</span>
+                  <span>بيانات الكابتن المسؤول عن التوصيل</span>
                 </div>
                 <span className="text-emerald-600 font-bold text-[11px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  ● متصل وحي
+                  ● متصل بالخدمة
                 </span>
               </div>
 
@@ -463,16 +525,16 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
 
               <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 pt-1">
                 <div className="bg-white p-2 rounded border border-slate-100">
-                  نوع المركبة: <strong className="text-slate-900">{driver.vehicleType || 'دراجة'}</strong>
+                  المركبة: <strong className="text-slate-900">{driver.vehicleType || 'دراجة'}</strong>
                 </div>
                 <div className="bg-white p-2 rounded border border-slate-100">
-                  رقم اللوحة: <strong className="text-slate-900 font-mono">{driver.plateNumber || '—'}</strong>
+                  اللوحة: <strong className="text-slate-900 font-mono">{driver.plateNumber || '—'}</strong>
                 </div>
                 <div className="bg-white p-2 rounded border border-slate-100">
                   السرعة: <strong className="text-blue-600 font-mono">{driver.speed || 35} كم/س</strong>
                 </div>
                 <div className="bg-white p-2 rounded border border-slate-100">
-                  أهمية الخدمة: <strong className="text-emerald-600 font-bold">فزعة سريعة</strong>
+                  الطلبات المسندة: <strong className="text-amber-600 font-bold">{driver.assignedOrdersCount || 1}</strong>
                 </div>
               </div>
             </div>
@@ -486,7 +548,7 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
               >
                 <Globe className="w-4 h-4 text-emerald-200" />
-                <span>فتح التوجيه الملاحي في OpenStreetMap</span>
+                <span>فتح التوجيه الملاحي المباشر في OpenStreetMap</span>
               </a>
 
               <a

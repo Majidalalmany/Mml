@@ -224,6 +224,10 @@ export interface QualityReview {
 }
 
 export type OrderStatus = 
+  | 'PENDING_REVIEW'
+  | 'pending_review'
+  | 'APPROVED'
+  | 'approved'
   | 'NEW'
   | 'PREPARING'
   | 'DELIVERING'
@@ -236,11 +240,65 @@ export type OrderStatus =
   | 'cancelled'
   | 'returned';
 
+export interface VehicleType {
+  id: string;
+  name: string;
+  nameEn: string;
+  icon: string;
+  imageUrl?: string;
+  pricePerKm: number;
+  minDeliveryFee: number;
+  maxWeightKg: number;
+  maxVolumeDescription?: string;
+  description: string;
+  isDefault?: boolean;
+  isActive: boolean;
+  order: number;
+}
+
+export interface ServiceVehiclePricing {
+  motorcyclePricePerKm: number;
+  carPricePerKm: number;
+  truckPricePerKm: number;
+  minFee: number;
+}
+
+export type InternationalFreightCurrency = 'YER' | 'SAR' | 'USD';
+
+export interface InternationalShippingPricing {
+  fixedBaseFreightFee: number; // رسوم الشحن والنقل الدولي الثابتة/الموحدة
+  freightCurrency?: InternationalFreightCurrency; // العملة المحددة لرسوم الشحن الدولي (YER / SAR / USD)
+  motorcycleLastMilePerKm: number;
+  carLastMilePerKm: number;
+  truckLastMilePerKm: number;
+  minDeliveryFee: number;
+}
+
+export interface MultiServicePricingConfig {
+  storeOrders: ServiceVehiclePricing;
+  manfaahFazaa: ServiceVehiclePricing;
+  internationalShipping: InternationalShippingPricing;
+  roadCurvatureFactor: number;
+  enableLiveRoadRouting: boolean;
+  updatedAt?: any;
+}
+
+export interface PricingSettings {
+  generalMinDeliveryFee: number; // minimum 500 YER for regular trips
+  manfaahMinDeliveryFee: number; // minimum 700 YER for Manfaah/Fazaa trips
+  roadCurvatureFactor: number; // realistic road routing multiplier
+  enableLiveRoadRouting: boolean;
+  multiServiceConfig?: MultiServicePricingConfig;
+  updatedAt?: any;
+}
+
 export interface OrderItem {
   id?: string;
   productName: string;
+  name?: string;
   price: number;
   quantity: number;
+  weightKg?: number;
   options?: string[];
   notes?: string;
 }
@@ -265,15 +323,37 @@ export interface Order {
   storeName?: string;
   total: number;
   totalPrice?: number;
+  itemsTotal?: number;
+  subtotal?: number;
   deliveryFee?: number;
+  calculatedDistanceKm?: number;
+  actualRoadDistanceKm?: number;
+  airDistanceKm?: number;
+  estimatedWeightKg?: number;
+  approvedWeightKg?: number;
+  vehicleTypeId?: string;
+  vehicleTypeName?: string;
+  suggestedVehicleId?: string;
+  suggestedVehicleName?: string;
+  needsAdminReview?: boolean;
+  reviewedByAdmin?: boolean;
+  reviewedByAdminName?: string;
+  reviewedAt?: string;
+  adminReviewNotes?: string;
+  routingMethod?: 'google_routes_api' | 'road_network_topology';
   status: OrderStatus;
+  serviceType?: 'regular' | 'manfaah' | 'fazaa';
   itemsCount: number;
   items?: OrderItem[];
   deliveryType?: 'delivery' | 'pickup';
-  paymentMethod?: 'cash' | 'card' | 'wallet';
+  paymentMethod?: 'cash' | 'card' | 'wallet' | 'jawali' | string;
   paymentStatus?: 'paid' | 'pending';
   address?: string;
   location?: string | { latitude?: number; longitude?: number; address?: string };
+  pickupLat?: number;
+  pickupLng?: number;
+  dropoffLat?: number;
+  dropoffLng?: number;
   notes?: string;
   createdAt?: any;
   updatedAt?: any;
@@ -327,6 +407,11 @@ export interface FazaaOrder {
   packageWeightKg?: number;
   packageSpecs?: string;
   calculatedDistanceKm?: number;
+  actualRoadDistanceKm?: number;
+  vehicleTypeId?: string;
+  vehicleTypeName?: string;
+  paymentMethod?: 'cash' | 'card' | 'wallet';
+  paymentStatus?: 'paid' | 'pending';
   calculatedDeliveryFee?: number;
   driverRouteInfo?: string;
   isInstant: boolean;
@@ -401,10 +486,13 @@ export interface ActiveDeliveryOrder {
   destLng?: number;
   pickupLat?: number;
   pickupLng?: number;
-  fee?: number;
+  fee?: number; // رسوم التوصيل
+  totalAmount?: number; // إجمالي مبلغ الطلب المستحق
+  itemsTotal?: number; // إجمالي المنتجات
   status: 'delivering' | 'assigned' | 'arrived' | 'new' | 'completed' | 'cancelled';
   estimatedMinutes?: number;
   distanceKm?: number;
+  actualRoadDistanceKm?: number;
   invoiceImageUrl?: string | null;
   invoiceUploadTime?: string | null;
   invoiceDriverName?: string | null;

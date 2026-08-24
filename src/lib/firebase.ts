@@ -525,6 +525,17 @@ export async function getDocs(queryOrCol: CollectionReference | Query): Promise<
   return buildSnapshot(items);
 }
 
+export async function getDoc(docRef: DocumentReference): Promise<DocumentSnapshot> {
+  const colName = docRef._collectionName;
+  const items = getLocalCollection(colName);
+  const found = items.find(item => String(item.id) === String(docRef.id));
+  return {
+    id: docRef.id,
+    exists: () => !!found,
+    data: () => found ? { ...found } : {}
+  };
+}
+
 export async function addDoc(colRef: CollectionReference, data: Record<string, any>): Promise<DocumentReference> {
   const colName = colRef._collectionName;
   const items = getLocalCollection(colName);

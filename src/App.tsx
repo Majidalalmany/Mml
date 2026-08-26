@@ -47,6 +47,7 @@ import { FazaaOrdersManager } from './components/FazaaOrdersManager';
 import { AppUsersManager } from './components/AppUsersManager';
 import { DriversMapManager } from './components/DriversMapManager';
 import { InvoicesManager } from './components/InvoicesManager';
+import { GlobalStoresHub } from './components/global/GlobalStoresHub';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(() => {
@@ -1333,6 +1334,15 @@ export default function App() {
                           orders={orders}
                           onNavigateToFinancial={() => setActiveTab('financial')}
                           onNavigateToDelivery={() => setActiveTab('delivery')}
+                          onNavigateToGlobalStores={() => setActiveTab('global_stores')}
+                        />
+                      )}
+
+                      {/* 1b. Global Stores Experience (Amazon, SHEIN, AliExpress) */}
+                      {activeTab === 'global_stores' && (
+                        <GlobalStoresHub
+                          currentUser={currentUser}
+                          onShowToast={showToast}
                         />
                       )}
 

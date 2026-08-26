@@ -122,6 +122,9 @@ export const VehiclesPricingManager: React.FC<VehiclesPricingManagerProps> = ({
   if (simVehicleCategory === 'car') vehicleName = 'سيارة / باص';
   if (simVehicleCategory === 'truck') vehicleName = 'شاحنة / دينا';
 
+  const simDetourFactor = simVehicleCategory === 'motorcycle' ? 1.0 : 1.18;
+  const simAdjustedDistanceKm = Number((simDistanceKm * simDetourFactor).toFixed(2));
+
   if (activeTab === 'store') {
     simPricePerKm = simVehicleCategory === 'motorcycle' 
       ? config.storeOrders.motorcyclePricePerKm 
@@ -146,7 +149,7 @@ export const VehiclesPricingManager: React.FC<VehiclesPricingManagerProps> = ({
     simMinFee = config.internationalShipping.minDeliveryFee;
   }
 
-  const simRawCalculatedFee = simDistanceKm * simPricePerKm;
+  const simRawCalculatedFee = Number((simAdjustedDistanceKm * simPricePerKm).toFixed(2));
   const simRoundedFee = Math.ceil(simRawCalculatedFee / 50) * 50;
   const isSimMinApplied = (simRoundedFee < simMinFee);
   const simEffectiveDelivery = Math.max(simMinFee, simRoundedFee);
@@ -973,22 +976,22 @@ export const VehiclesPricingManager: React.FC<VehiclesPricingManagerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center">
           {/* Select Vehicle Category */}
           <div className="sm:col-span-4">
-            <label className="text-xs text-slate-300 font-bold block mb-1">اختر وسيلة النقل:</label>
+            <label className="text-xs text-slate-300 font-bold block mb-1">اختر وسيلة النقل وملف المسار:</label>
             <select
               value={simVehicleCategory}
               onChange={(e) => setSimVehicleCategory(e.target.value as any)}
               className="w-full bg-slate-800 border border-slate-600 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-amber-500 focus:outline-none"
             >
-              <option value="motorcycle">🏍️ دراجة نارية ({simVehicleCategory === 'motorcycle' ? simPricePerKm : ''} ر.ي/كم)</option>
-              <option value="car">🚗 سيارة / باص</option>
-              <option value="truck">🚚 شاحنة نقل دينا</option>
+              <option value="motorcycle">🏍️ دراجة نارية (مسار مباشر 1.0x)</option>
+              <option value="car">🚗 سيارة / باص (+18% معامل تحويلات)</option>
+              <option value="truck">🚚 شاحنة دينا (+18% معامل تحويلات)</option>
             </select>
           </div>
 
           {/* Distance Input */}
           <div className="sm:col-span-4">
             <label className="text-xs text-slate-300 font-bold block mb-1">
-              المسافة الطرقية الواقعية (كم):
+              مسافة الطرق الأساسية (كم):
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -1001,7 +1004,7 @@ export const VehiclesPricingManager: React.FC<VehiclesPricingManagerProps> = ({
                 className="w-full bg-slate-800 border border-slate-600 text-white text-xs font-bold font-mono rounded-xl px-3 py-2.5 text-center focus:ring-2 focus:ring-amber-500 focus:outline-none"
               />
               <div className="flex gap-1">
-                {[3.6, 5.0, 8.5].map(d => (
+                {[3.6, 5.0, 20.91].map(d => (
                   <button
                     key={d}
                     type="button"
@@ -1037,16 +1040,16 @@ export const VehiclesPricingManager: React.FC<VehiclesPricingManagerProps> = ({
           <Info className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
           <div className="space-y-1">
             <strong className="text-amber-300 font-extrabold block">
-              تفاصيل الاحتساب:
+              تفاصيل الاحتساب المالي:
             </strong>
             <p className="text-[11px] leading-relaxed font-mono">
               {activeTab === 'international' ? (
                 <span>
-                  رسوم الشحن الدولي الثابتة ({simBaseFreight.toLocaleString()} {config.internationalShipping.freightCurrency === 'SAR' ? 'ر.س' : config.internationalShipping.freightCurrency === 'USD' ? '$' : 'ر.ي'}) + ميل أخير ({simDistanceKm} كم × {simPricePerKm} ر.ي = {simRawCalculatedFee.toFixed(0)} ر.ي ➔ تقريب {simRoundedFee.toLocaleString()} ر.ي {isSimMinApplied ? `-> اعتُمد الحد الأدنى ${simMinFee.toLocaleString()} ر.ي` : ''}) {config.internationalShipping.freightCurrency && config.internationalShipping.freightCurrency !== 'YER' ? `[الرسوم الثابتة بعملة ${config.internationalShipping.freightCurrency}]` : `= ${simTotalFinal.toLocaleString()} ر.ي`}
+                  رسوم الشحن الدولي الثابتة ({simBaseFreight.toLocaleString()} {config.internationalShipping.freightCurrency === 'SAR' ? 'ر.س' : config.internationalShipping.freightCurrency === 'USD' ? '$' : 'ر.ي'}) + ميل أخير ({simAdjustedDistanceKm} كم {simDetourFactor > 1 ? `[مسافة ${simDistanceKm} كم × ${simDetourFactor} تحويلات]` : ''} × {simPricePerKm} ر.ي = {simRawCalculatedFee} ر.ي ➔ تقريب ذكي {simRoundedFee.toLocaleString()} ر.ي {isSimMinApplied ? `-> اعتُمد الحد الأدنى ${simMinFee.toLocaleString()} ر.ي` : ''}) {config.internationalShipping.freightCurrency && config.internationalShipping.freightCurrency !== 'YER' ? `[الرسوم الثابتة بعملة ${config.internationalShipping.freightCurrency}]` : `= ${simTotalFinal.toLocaleString()} ر.ي`}
                 </span>
               ) : (
                 <span>
-                  المسافة ({simDistanceKm} كم) × سعر الكيلو ({simPricePerKm} ر.ي/كم) = {simRawCalculatedFee.toFixed(0)} ر.ي ➔ تقريب تلقائي لأقرب 50 ر.ي ({simRoundedFee.toLocaleString()} ر.ي) {isSimMinApplied ? `➔ اعتُمد الحد الأدنى المقرر (${simMinFee.toLocaleString()} ر.ي) لأن الناتج أقل منه.` : `➔ الناتج المعتمد: ${simTotalFinal.toLocaleString()} ر.ي`}
+                  المسافة المعدلة ({simAdjustedDistanceKm} كم {simDetourFactor > 1 ? `[OSRM ${simDistanceKm} كم × ${simDetourFactor}x تحويلات]` : '[1.0x مباشر]'}) × سعر الكيلو ({simPricePerKm} ر.ي/كم) = {simRawCalculatedFee} ر.ي ➔ تقريب ذكي لأقرب 50 ر.ي ({simRoundedFee.toLocaleString()} ر.ي) {isSimMinApplied ? `➔ اعتُمد الحد الأدنى المقرر (${simMinFee.toLocaleString()} ر.ي) لأن الناتج أقل منه.` : `➔ الناتج المعتمد: ${simTotalFinal.toLocaleString()} ر.ي`}
                 </span>
               )}
             </p>

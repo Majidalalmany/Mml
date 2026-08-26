@@ -33,6 +33,7 @@ interface DashboardOverviewProps {
   orders?: Order[];
   onNavigateToFinancial?: () => void;
   onNavigateToDelivery?: () => void;
+  onNavigateToGlobalStores?: () => void;
 }
 
 const PERFORMANCE_DATA = [
@@ -56,6 +57,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   orders = [],
   onNavigateToFinancial,
   onNavigateToDelivery,
+  onNavigateToGlobalStores,
 }) => {
   const totalOrdersCount = orders.length > 0 ? orders.length + 1480 : 1524;
   const totalRevenue = 5730000; // YER
@@ -76,14 +78,28 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <ShieldCheck className="w-3.5 h-3.5" />
               تشفير SSL / HTTPS مفعل
             </span>
+            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+              <Globe className="w-3.5 h-3.5" />
+              المتاجر العالمية مفعّلة
+            </span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight">اللوحة الرئيسية لإحصائيات وبيانات الموقع العامة</h1>
           <p className="text-xs text-slate-300 max-w-2xl">
-            متابعة فورية ومباشرة للأداء العام للشبكة، حركة الطلبات والإيرادات، أسطول التوصيل، وحالة الخوادم المركزية بدون عرض بيانات المتاجر أو الأصناف التفصيلية.
+            متابعة فورية ومباشرة للأداء العام للشبكة، حركة الطلبات والإيرادات، أسطول التوصيل، والمتاجر العالمية (Amazon, SHEIN, AliExpress).
           </p>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {onNavigateToGlobalStores && (
+            <button
+              onClick={onNavigateToGlobalStores}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Globe className="w-4 h-4 text-slate-950" />
+              <span>المتاجر العالمية (Amazon/Shein)</span>
+            </button>
+          )}
+
           <button
             onClick={onNavigateToFinancial}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-2 cursor-pointer"

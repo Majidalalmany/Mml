@@ -34,21 +34,71 @@ export const YEMEN_LOCALITIES: Record<string, { lat: number; lng: number; name: 
   'تعز - شارع جمال': { lat: 13.5780, lng: 44.0150, name: 'شارع جمال - تعز' }
 };
 
+export const MOTORCYCLE_DETOUR_FACTOR = 1.0; // فئة الدراجة النارية: مسار OSRM الفعلي المباشر (1.0x) دون أي زيادة
+export const CAR_TRUCK_DETOUR_FACTOR = 1.18; // فئة السيارة والشاحنة: معامل التحويلات والانسدادات (+18%) لمواكبة إغلاقات الشوارع
+
 export interface DeliveryCalculationResult {
+  baseOsrmDistanceKm: number;
   actualRoadDistanceKm: number;
+  detourBufferFactor: number;
   straightLineDistanceKm: number;
   curvatureFactor: number;
   vehicleType: VehicleType;
   pricePerKm: number;
+  rawDistanceCost: number;
   distanceCost: number;
   rawCost: number;
   minApplied: boolean;
   appliedMinFee: number;
   finalDeliveryFee: number;
-  serviceType: 'regular' | 'manfaah' | 'supermarket';
+  serviceType: 'regular' | 'manfaah' | 'supermarket' | 'international' | 'fazaa' | 'store' | any;
   calculationBreakdown: string;
   routeSummary?: string;
   routingMethod?: 'google_routes_api' | 'road_network_topology';
+}
+
+/**
+ * Returns the Detour Buffer Factor based on vehicle routing profile:
+ * 1. Motorcycle / Bike -> 1.0x (Direct OSRM distance)
+ * 2. Car / Truck / Bus -> 1.18x (+18% detour & concrete barrier closure buffer)
+ */
+export function getVehicleDetourBufferFactor(vehicle?: VehicleType | string | null): number {
+  if (!vehicle) return CAR_TRUCK_DETOUR_FACTOR;
+  
+  const text = typeof vehicle === 'string' 
+    ? vehicle.toLowerCase() 
+    : `${vehicle.id || ''} ${vehicle.name || ''} ${vehicle.icon || ''}`.toLowerCase();
+  
+  if (
+    text.includes('motorcycle') || 
+    text.includes('bike') || 
+    text.includes('دراجة') || 
+    text.includes('موتور') ||
+    text.includes('سيكل')
+  ) {
+    return MOTORCYCLE_DETOUR_FACTOR; // 1.0x
+  }
+  
+  return CAR_TRUCK_DETOUR_FACTOR; // 1.18x
+}
+
+/**
+ * Computes vehicle-specific adjusted road distance:
+ * - Motorcycle: rawOsrmDistance * 1.0
+ * - Car / Truck: rawOsrmDistance * 1.18 (e.g., 20.91 km * 1.18 = 24.67 km)
+ */
+export function calculateAdjustedRoadDistance(
+  rawOsrmDistanceKm: number, 
+  vehicle?: VehicleType | string | null
+): { adjustedDistanceKm: number; detourFactor: number; baseDistanceKm: number } {
+  const base = Math.max(0.1, Number(rawOsrmDistanceKm) || 1.0);
+  const detourFactor = getVehicleDetourBufferFactor(vehicle);
+  const adjustedDistanceKm = Number((base * detourFactor).toFixed(2));
+  return {
+    baseDistanceKm: base,
+    detourFactor,
+    adjustedDistanceKm
+  };
 }
 
 /**
@@ -271,27 +321,44 @@ export function roundToNearest50(amount: number): number {
 
 /**
  * Complete Delivery Fee Calculation Engine adhering to the requested business formula:
- * 1. Calculated_Fee = Distance_KM * Rate_Per_KM
- * 2. Rounded_Fee = Math.ceil(Calculated_Fee / 50) * 50
- * 3. Final_Delivery_Fee = Math.max(Rounded_Fee, Minimum_Vehicle_Fee) (+ baseFixedFee if international)
+ * 1. Adjusted_Distance_KM = Base_OSRM_KM * Vehicle_Detour_Factor (1.0x for Motorcycle, 1.18x for Car/Truck)
+ * 2. Calculated_Raw_Fee = Adjusted_Distance_KM * Rate_Per_KM
+ * 3. Rounded_Fee = Math.ceil(Calculated_Raw_Fee / 50) * 50
+ * 4. Final_Delivery_Fee = Math.max(Rounded_Fee, Minimum_Vehicle_Fee) (+ baseFixedFee if international)
  */
 export function calculateDeliveryCost({
   roadDistanceKm,
+  baseRawOsrmDistanceKm,
   vehicle,
   serviceType = 'regular',
-  pricingSettings = DEFAULT_PRICING_SETTINGS
+  pricingSettings = DEFAULT_PRICING_SETTINGS,
+  alreadyAdjusted = false
 }: {
   roadDistanceKm: number;
+  baseRawOsrmDistanceKm?: number;
   vehicle: VehicleType;
   serviceType?: 'regular' | 'store' | 'manfaah' | 'fazaa' | 'international' | 'supermarket' | string;
   pricingSettings?: PricingSettings;
+  alreadyAdjusted?: boolean;
 }): DeliveryCalculationResult {
-  const safeDistance = Math.max(0.5, Number(roadDistanceKm) || 1.0);
   const multiConfig = pricingSettings.multiServiceConfig || getLocalMultiServicePricing();
   
-  const isMotorcycle = vehicle.icon === 'Bike' || vehicle.name.includes('دراجة') || vehicle.id === 'veh-motorcycle';
+  const isMotorcycle = vehicle.icon === 'Bike' || vehicle.name.includes('دراجة') || vehicle.name.includes('موتور') || vehicle.id === 'veh-motorcycle';
   const isCar = vehicle.icon === 'Car' || vehicle.name.includes('سيارة') || vehicle.name.includes('باص') || vehicle.id === 'veh-car';
   const isTruck = vehicle.icon === 'Truck' || vehicle.name.includes('شاحنة') || vehicle.name.includes('دينا') || vehicle.id === 'veh-truck';
+
+  const detourFactor = getVehicleDetourBufferFactor(vehicle);
+
+  let baseOsrmDistanceKm = Math.max(0.5, Number(baseRawOsrmDistanceKm || roadDistanceKm) || 1.0);
+  let safeDistance = alreadyAdjusted 
+    ? Math.max(0.5, Number(roadDistanceKm) || 1.0)
+    : Number((baseOsrmDistanceKm * detourFactor).toFixed(2));
+
+  if (alreadyAdjusted && !baseRawOsrmDistanceKm) {
+    baseOsrmDistanceKm = detourFactor > 1 
+      ? Number((safeDistance / detourFactor).toFixed(2)) 
+      : safeDistance;
+  }
 
   let pricePerKm = vehicle.pricePerKm || 100;
   let appliedMinFee = Math.max(500, vehicle.minDeliveryFee || 500);
@@ -327,10 +394,10 @@ export function calculateDeliveryCost({
     appliedMinFee = Math.max(minSetting, vehicle.minDeliveryFee || 500);
   }
 
-  // 1. Calculated_Fee = Distance_KM * Rate_Per_KM
-  const calculatedFee = safeDistance * pricePerKm;
+  // 1. Calculated_Fee = Distance_KM * Rate_Per_KM (مثال: 24.67 كم × 350 ر.ي/كم = 8634.5 ر.ي)
+  const calculatedFee = Number((safeDistance * pricePerKm).toFixed(2));
   
-  // 2. Rounded_Fee = Math.ceil(Calculated_Fee / 50) * 50
+  // 2. Rounded_Fee = Math.ceil(Calculated_Fee / 50) * 50 (مثال: تقريب 8634.5 -> 8650 ر.ي)
   const roundedFee = Math.ceil(calculatedFee / 50) * 50;
 
   // 3. Final_Delivery_Fee = Math.max(Rounded_Fee, Minimum_Vehicle_Fee) (+ baseFixedFee if international)
@@ -342,20 +409,22 @@ export function calculateDeliveryCost({
   const currencySymbol = multiConfig.internationalShipping.freightCurrency === 'SAR' ? 'ر.س' : multiConfig.internationalShipping.freightCurrency === 'USD' ? '$' : 'ر.ي';
 
   if (serviceType === 'international') {
-    breakdown = `شحن دولي ثابت (${baseFixedFee.toLocaleString()} ${currencySymbol}) + ميل أخير (${safeDistance} كم × ${pricePerKm} ر.ي = ${calculatedFee.toFixed(0)} ر.ي ➔ تقريب ${roundedFee.toLocaleString()} ر.ي ${isMinApplied ? `[اعتُمد الحد الأدنى: ${appliedMinFee.toLocaleString()} ر.ي]` : ''}) = ${finalDeliveryFee.toLocaleString()} ر.ي`;
+    breakdown = `شحن دولي ثابت (${baseFixedFee.toLocaleString()} ${currencySymbol}) + ميل أخير (${safeDistance} كم ${detourFactor > 1 ? `[تحويلات ${detourFactor}x]` : ''} × ${pricePerKm} ر.ي = ${calculatedFee} ر.ي ➔ تقريب ${roundedFee.toLocaleString()} ر.ي ${isMinApplied ? `[اعتُمد الحد الأدنى: ${appliedMinFee.toLocaleString()} ر.ي]` : ''}) = ${finalDeliveryFee.toLocaleString()} ر.ي`;
   } else if (isMinApplied) {
-    breakdown = `${safeDistance} كم مسافة طرقية × ${pricePerKm} ر.ي/كم = ${calculatedFee.toFixed(0)} ر.ي (مقرب: ${roundedFee.toLocaleString()} ر.ي) ➔ تم اعتماد الحد الأدنى المقرر: ${appliedMinFee.toLocaleString()} ر.ي`;
+    breakdown = `${safeDistance} كم مسافة طرقية ${detourFactor > 1 ? `(OSRM ${baseOsrmDistanceKm} كم × ${detourFactor} تحويلات)` : ''} × ${pricePerKm} ر.ي/كم = ${calculatedFee} ر.ي (مقرب: ${roundedFee.toLocaleString()} ر.ي) ➔ تم اعتماد الحد الأدنى المقرر: ${appliedMinFee.toLocaleString()} ر.ي`;
   } else {
-    const isRoundedUp = roundedFee !== Math.round(calculatedFee);
-    breakdown = `${safeDistance} كم مسافة طرقية × ${pricePerKm} ر.ي/كم = ${calculatedFee.toFixed(0)} ر.ي ${isRoundedUp ? `➔ تقريب تلقائي للأعلى (مضاعف 50 ر.ي): ${finalDeliveryFee.toLocaleString()} ر.ي` : `= ${finalDeliveryFee.toLocaleString()} ر.ي`}`;
+    breakdown = `${safeDistance} كم مسافة طرقية ${detourFactor > 1 ? `(OSRM ${baseOsrmDistanceKm} كم × ${detourFactor} تحويلات)` : ''} × ${pricePerKm} ر.ي/كم = ${calculatedFee} ر.ي ➔ تقريب ذكي للأعلى (مضاعف 50 ر.ي Ceil): ${finalDeliveryFee.toLocaleString()} ر.ي`;
   }
 
   return {
+    baseOsrmDistanceKm,
     actualRoadDistanceKm: safeDistance,
-    straightLineDistanceKm: Number((safeDistance / (multiConfig.roadCurvatureFactor || 1.38)).toFixed(1)),
+    detourBufferFactor: detourFactor,
+    straightLineDistanceKm: Number((baseOsrmDistanceKm / (multiConfig.roadCurvatureFactor || 1.38)).toFixed(1)),
     curvatureFactor: multiConfig.roadCurvatureFactor || 1.38,
     vehicleType: vehicle,
     pricePerKm,
+    rawDistanceCost: calculatedFee,
     distanceCost: roundedFee,
     rawCost: calculatedFee + baseFixedFee,
     minApplied: isMinApplied,
@@ -363,6 +432,6 @@ export function calculateDeliveryCost({
     finalDeliveryFee,
     serviceType: serviceType as any,
     calculationBreakdown: breakdown,
-    routeSummary: `مسار شبكة الطرق الفعلية: ${safeDistance} كم عبر ${vehicle.name}`
+    routeSummary: `مسار شبكة الطرق: ${safeDistance} كم عبر ${vehicle.name}${detourFactor > 1 ? ` (+18% تحويلات)` : ''}`
   };
 }

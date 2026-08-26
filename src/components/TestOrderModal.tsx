@@ -134,11 +134,13 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
   }, [safePickupLat, safePickupLng, safeDropoffLat, safeDropoffLng, isOpen]);
 
   // Real-time Delivery Cost Calculation adhering strictly to:
-  // 1. Calculated_Fee = Distance_KM (from OSRM) * Rate_Per_KM
-  // 2. Rounded_Fee = Math.ceil(Calculated_Fee / 50) * 50
-  // 3. Final_Delivery_Fee = Math.max(Rounded_Fee, Minimum_Vehicle_Fee) (+ baseFixedFee if international)
+  // 1. Adjusted_Distance = OSRM_Distance * Vehicle_Buffer_Factor (1.0x for Motorcycle, 1.18x for Car/Truck)
+  // 2. Calculated_Fee = Adjusted_Distance * Rate_Per_KM
+  // 3. Rounded_Fee = Math.ceil(Calculated_Fee / 50) * 50
+  // 4. Final_Delivery_Fee = Math.max(Rounded_Fee, Minimum_Vehicle_Fee) (+ baseFixedFee if international)
   const pricingResult = calculateDeliveryCost({
     roadDistanceKm: liveRoadDistanceKm,
+    baseRawOsrmDistanceKm: liveRoadDistanceKm,
     vehicle: selectedVehicle,
     serviceType: serviceType,
     pricingSettings: {
@@ -150,9 +152,9 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
     }
   });
 
-  // Calculate intermediate values for clear UI display
-  const rawCalculatedFee = Number((liveRoadDistanceKm * pricingResult.pricePerKm).toFixed(1));
-  const roundedFee = Math.ceil(rawCalculatedFee / 50) * 50;
+  const adjustedDistanceKm = pricingResult.actualRoadDistanceKm;
+  const rawCalculatedFee = pricingResult.rawDistanceCost;
+  const roundedFee = pricingResult.distanceCost;
 
   // Handlers for Preset Selectors (Immediate routing trigger)
   const handlePickupPresetChange = (idx: number) => {
@@ -533,12 +535,18 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
 
           {/* 3. Vehicle Type Selection */}
           <div>
-            <label className="text-xs font-extrabold text-slate-800 block mb-2">اختيار وسيلة النقل:</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-extrabold text-slate-800">اختيار وسيلة النقل وملف المسار (Routing Profile):</label>
+              <span className="text-[10px] text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full font-bold border border-blue-200">
+                الدراجة: 1.0x مباشر • السيارات والشاحنات: 1.18x معامل تحويلات
+              </span>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {vehicles.map((veh) => {
                 const isSelected = veh.id === selectedVehicleId;
-                const isMotorcycle = veh.id === 'veh-motorcycle';
-                const isCar = veh.id === 'veh-car';
+                const isMotorcycle = veh.id === 'veh-motorcycle' || veh.name.includes('دراجة');
+                const isCar = veh.id === 'veh-car' || veh.name.includes('سيارة');
+                const bufferLabel = isMotorcycle ? 'مسار مباشر (1.0x)' : 'معامل تحويلات (+18%)';
                 
                 return (
                   <button
@@ -557,13 +565,18 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
                         {isCar && <Car className="w-4 h-4" />}
                         {!isMotorcycle && !isCar && <Truck className="w-4 h-4" />}
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500 font-bold">
-                        {veh.pricePerKm} ر.ي/كم
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        isMotorcycle ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {bufferLabel}
                       </span>
                     </div>
                     <div>
                       <div className="font-extrabold text-xs text-slate-900">{veh.name}</div>
-                      <span className="text-[10px] text-slate-400">الحد الأدنى: {veh.minDeliveryFee} ر.ي</span>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+                        <span className="font-mono font-bold text-blue-700">{veh.pricePerKm} ر.ي/كم</span>
+                        <span>أدنى: {veh.minDeliveryFee} ر.ي</span>
+                      </div>
                     </div>
                   </button>
                 );
@@ -571,7 +584,7 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
             </div>
           </div>
 
-          {/* 4. REAL-TIME CALCULATION WITH SMART CEIL ROUNDING (Requirements 2 & 3) */}
+          {/* 4. REAL-TIME CALCULATION WITH SMART CEIL ROUNDING & DETOUR BUFFER (Requirements 2 & 3) */}
           <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-4 sm:p-5 rounded-2xl shadow-md border border-blue-800 space-y-3.5">
             <div className="flex items-center justify-between border-b border-blue-800 pb-2.5">
               <div className="flex items-center gap-2">
@@ -583,30 +596,37 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-              <div className="bg-blue-950/80 p-2.5 rounded-xl border border-blue-700/50">
-                <span className="text-[10px] text-slate-400 block mb-0.5">المسافة الهوائية (للمقارنة):</span>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-center">
+              <div className="bg-blue-950/80 p-2 rounded-xl border border-blue-700/50">
+                <span className="text-[10px] text-slate-400 block mb-0.5">المسافة الهوائية:</span>
                 <span className="font-mono text-xs font-bold text-slate-300">{liveAirDistanceKm} كم</span>
               </div>
 
-              <div className="bg-blue-950/80 p-2.5 rounded-xl border border-blue-700/50 relative">
+              <div className="bg-blue-950/80 p-2 rounded-xl border border-blue-700/50 relative">
                 {isRoutingLoading && (
                   <div className="absolute top-1 left-1">
                     <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
                   </div>
                 )}
-                <span className="text-[10px] text-blue-300 block mb-0.5 font-bold">المسافة الطرقية الواقعية (OSRM):</span>
+                <span className="text-[10px] text-blue-300 block mb-0.5 font-bold">مسافة OSRM المباشرة:</span>
                 <span className="font-mono text-xs font-extrabold text-emerald-400">{liveRoadDistanceKm} كم</span>
               </div>
 
-              <div className="bg-blue-950/80 p-2.5 rounded-xl border border-blue-700/50">
+              <div className="bg-blue-950/80 p-2 rounded-xl border border-blue-700/50">
+                <span className="text-[10px] text-purple-300 block mb-0.5 font-bold">
+                  المسافة المعدلة للمركبة {pricingResult.detourBufferFactor > 1 ? '(+18%)' : '(1.0x)'}:
+                </span>
+                <span className="font-mono text-xs font-extrabold text-purple-300">{adjustedDistanceKm} كم</span>
+              </div>
+
+              <div className="bg-blue-950/80 p-2 rounded-xl border border-blue-700/50">
                 <span className="text-[10px] text-amber-300 block mb-0.5">الناتج الفعلي قبل التقريب:</span>
                 <span className="font-mono text-xs font-bold text-amber-300">
-                  {liveRoadDistanceKm} × {pricingResult.pricePerKm} = {rawCalculatedFee} ر.ي
+                  {adjustedDistanceKm} × {pricingResult.pricePerKm} = {rawCalculatedFee} ر.ي
                 </span>
               </div>
 
-              <div className="bg-emerald-950/90 p-2.5 rounded-xl border border-emerald-500/60 shadow-xs">
+              <div className="bg-emerald-950/90 p-2 rounded-xl border border-emerald-500/60 shadow-xs col-span-2 sm:col-span-1">
                 <span className="text-[10px] text-emerald-300 block mb-0.5">رسوم التوصيل المعتمدة:</span>
                 <span className="font-mono text-base font-black text-emerald-400">{pricingResult.finalDeliveryFee.toLocaleString()} ر.ي</span>
               </div>
@@ -620,8 +640,10 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[10px]">
                 <div className="bg-white/5 p-2 rounded-lg border border-white/10">
-                  <span className="text-slate-400 block">1. المسافة الفعلية × سعر الكيلو:</span>
-                  <strong className="text-white">{liveRoadDistanceKm} كم × {pricingResult.pricePerKm} = {rawCalculatedFee} ر.ي</strong>
+                  <span className="text-slate-400 block">1. المسافة المعدلة × سعر الكيلو:</span>
+                  <strong className="text-white">
+                    {adjustedDistanceKm} كم {pricingResult.detourBufferFactor > 1 ? `(OSRM × 1.18)` : `(1.0x)`} × {pricingResult.pricePerKm} = {rawCalculatedFee} ر.ي
+                  </strong>
                 </div>
                 <div className="bg-white/5 p-2 rounded-lg border border-white/10">
                   <span className="text-slate-400 block">2. التقريب للأعلى (مضاعف 50):</span>

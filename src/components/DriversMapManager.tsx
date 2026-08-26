@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Truck, 
   MapPin, 
@@ -165,14 +165,31 @@ const INITIAL_DEMO_DRIVERS: DriverUser[] = [
     email: 'tareq@jahez.com',
     vehicleType: 'دراجة نارية',
     plateNumber: 'تعز 9101-ج',
-    isOnline: false,
+    isOnline: true,
     status: 'active',
     role: 'driver',
     lat: 13.5789,
     lng: 44.0181,
-    speed: 0,
+    speed: 32,
     locationName: 'شارع جمال - تعز',
-    assignedOrdersCount: 0,
+    assignedOrdersCount: 1,
+    activeOrder: {
+      id: 'ord-taiz-5521',
+      orderNumber: 'FZ-5521',
+      customerName: 'الأستاذ كمال الحريبي',
+      customerPhone: '711998877',
+      storeName: 'مطاعم التحرير السياحي',
+      pickupAddress: 'شارع جمال - وسط المدينة',
+      dropoffAddress: 'حي المسبح - جوار حديقة المسبح',
+      destLat: 13.5890,
+      destLng: 44.0090,
+      pickupLat: 13.5780,
+      pickupLng: 44.0150,
+      fee: 1200,
+      status: 'delivering',
+      estimatedMinutes: 9,
+      distanceKm: 2.4
+    },
     createdAt: new Date().toISOString()
   },
   {
@@ -208,8 +225,127 @@ const INITIAL_DEMO_DRIVERS: DriverUser[] = [
       distanceKm: 2.9
     },
     createdAt: new Date().toISOString()
+  },
+  {
+    id: 'drv-ibb-5',
+    name: 'الكابتن بلال الإبي',
+    phone: '772334455',
+    email: '',
+    vehicleType: 'شاحنة نقل',
+    plateNumber: 'إب 7744-هـ',
+    isOnline: true,
+    status: 'active',
+    role: 'driver',
+    lat: 13.9667,
+    lng: 44.1833,
+    speed: 40,
+    locationName: 'الدائري الغربي - إب',
+    assignedOrdersCount: 1,
+    activeOrder: {
+      id: 'ord-ibb-8812',
+      orderNumber: 'FZ-8812',
+      customerName: 'مؤسسة النور للتجارة',
+      customerPhone: '770011223',
+      storeName: 'مخازن البناء والتموين',
+      pickupAddress: 'الدائري الغربي - مدخل المدينة',
+      dropoffAddress: 'شارع تعز - مفرق جبلة - عمارة الأمل',
+      destLat: 13.9480,
+      destLng: 44.1750,
+      pickupLat: 13.9720,
+      pickupLng: 44.1890,
+      fee: 4500,
+      status: 'delivering',
+      estimatedMinutes: 25,
+      distanceKm: 6.5
+    },
+    createdAt: new Date().toISOString()
   }
 ];
+
+export interface VehicleRouteTheme {
+  category: 'motorcycle' | 'car' | 'truck';
+  primaryColor: string; // Hex color for main route polyline
+  glowColor: string; // Semi-transparent wider backdrop glow
+  badgeBg: string; // Tailwind class for badges
+  badgeBorder: string;
+  badgeText: string;
+  chipClass: string;
+  nameAr: string;
+  iconEmoji: string;
+  dashArray: string;
+  weight: number;
+}
+
+/**
+ * Returns distinct, high-contrast visual theme based on Vehicle Type:
+ * - 🟢 Motorcycle (دراجة نارية): Emerald Green (#10b981)
+ * - 🔵 Car / Sedan / Van (سيارة / باص): Royal / Indigo Blue (#2563eb)
+ * - 🟣 Truck / Heavy Delivery (شاحنة نقل / دينا): Vivid Purple / Violet (#8b5cf6)
+ */
+export function getVehicleRouteTheme(vehicleType?: string | null): VehicleRouteTheme {
+  const v = (vehicleType || '').toLowerCase();
+
+  // 1. Motorcycle / Bike -> Emerald Green
+  if (
+    v.includes('دراجة') || 
+    v.includes('موتور') || 
+    v.includes('سيكل') || 
+    v.includes('bike') || 
+    v.includes('motorcycle')
+  ) {
+    return {
+      category: 'motorcycle',
+      primaryColor: '#10b981', // Vivid Emerald Green
+      glowColor: 'rgba(16, 185, 129, 0.4)',
+      badgeBg: 'bg-emerald-600',
+      badgeBorder: 'border-emerald-400',
+      badgeText: 'text-emerald-100',
+      chipClass: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+      nameAr: 'دراجة نارية',
+      iconEmoji: '🛵',
+      dashArray: '8, 6',
+      weight: 6
+    };
+  }
+
+  // 2. Truck / Dina / Heavy -> Vivid Purple / Violet
+  if (
+    v.includes('شاحنة') || 
+    v.includes('دينا') || 
+    v.includes('نقل') || 
+    v.includes('تريلا') || 
+    v.includes('truck')
+  ) {
+    return {
+      category: 'truck',
+      primaryColor: '#8b5cf6', // Vivid Purple
+      glowColor: 'rgba(139, 92, 246, 0.4)',
+      badgeBg: 'bg-purple-600',
+      badgeBorder: 'border-purple-400',
+      badgeText: 'text-purple-100',
+      chipClass: 'bg-purple-50 text-purple-800 border-purple-300',
+      nameAr: 'شاحنة / دينا',
+      iconEmoji: '🚚',
+      dashArray: '12, 8',
+      weight: 7
+    };
+  }
+
+  // 3. Car / Sedan / Taxi / Van -> Royal Blue (Default for 4-wheel vehicles)
+  return {
+    category: 'car',
+    primaryColor: '#2563eb', // Royal Blue
+    glowColor: 'rgba(37, 99, 235, 0.4)',
+    badgeBg: 'bg-blue-600',
+    badgeBorder: 'border-blue-400',
+    badgeText: 'text-blue-100',
+    chipClass: 'bg-blue-50 text-blue-800 border-blue-300',
+    nameAr: 'سيارة / باص',
+    iconEmoji: '🚗',
+    dashArray: '10, 8',
+    weight: 6
+  };
+}
 
 interface DriversMapManagerProps {
   currentUser: AdminUser | null;
@@ -258,6 +394,10 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   const [tileLayerType, setTileLayerType] = useState<FreeTileLayerType>('voyager');
   const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
 
+  // Vehicle Category Filter & Fleet Multi-Route Mode
+  const [vehicleCategoryFilter, setVehicleCategoryFilter] = useState<'all' | 'motorcycle' | 'car' | 'truck'>('all');
+  const [showAllActiveRoutes, setShowAllActiveRoutes] = useState<boolean>(true);
+
   // Active Delivery Route Destination States
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<ActiveDeliveryOrder | null>(null);
   const [isDedicatedModalOpen, setIsDedicatedModalOpen] = useState<boolean>(false);
@@ -268,12 +408,18 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   const activeTileLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef<{ [key: string]: L.Marker }>({});
   const polylineRef = useRef<L.Polyline | null>(null);
+  const polylineGlowRef = useRef<L.Polyline | null>(null);
   const trailMarkersRef = useRef<L.Marker[]>([]);
 
   // Active Delivery Route Map Refs
   const deliveryPolylineRef = useRef<L.Polyline | null>(null);
+  const deliveryGlowPolylineRef = useRef<L.Polyline | null>(null);
   const destMarkerRef = useRef<L.Marker | null>(null);
   const pickupMarkerRef = useRef<L.Marker | null>(null);
+
+  // Fleet Multi-Routes Refs
+  const allRoutesPolylinesRef = useRef<L.Polyline[]>([]);
+  const allRoutesMarkersRef = useRef<L.Marker[]>([]);
 
   const canCreate = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'create');
   const canEdit = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'edit');
@@ -305,6 +451,10 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       deliveryPolylineRef.current.remove();
       deliveryPolylineRef.current = null;
     }
+    if (deliveryGlowPolylineRef.current) {
+      deliveryGlowPolylineRef.current.remove();
+      deliveryGlowPolylineRef.current = null;
+    }
     if (destMarkerRef.current) {
       destMarkerRef.current.remove();
       destMarkerRef.current = null;
@@ -322,6 +472,10 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       polylineRef.current.remove();
       polylineRef.current = null;
     }
+    if (polylineGlowRef.current) {
+      polylineGlowRef.current.remove();
+      polylineGlowRef.current = null;
+    }
     trailMarkersRef.current.forEach(m => m.remove());
     trailMarkersRef.current = [];
     setActiveTrailDriverId(null);
@@ -329,12 +483,21 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     setActiveTrailPoints([]);
   };
 
-  // Draw Active Delivery Route and Destination Marker when clicking an online driver
+  // Clear Fleet Multi-Routes from Map
+  const clearAllFleetRoutes = () => {
+    allRoutesPolylinesRef.current.forEach(p => p.remove());
+    allRoutesPolylinesRef.current = [];
+    allRoutesMarkersRef.current.forEach(m => m.remove());
+    allRoutesMarkersRef.current = [];
+  };
+
+  // Draw Active Delivery Route with Vehicle-Specific Color Coding (🟢 Green for Bike, 🔵 Blue for Car, 🟣 Purple for Truck)
   const handleDrawActiveOrderRoute = (driver: DriverUser) => {
     clearActiveDeliveryRoute();
     const map = leafletMapRef.current;
     if (!map || !driver || !driver.isOnline || driver.status !== 'active') return;
 
+    const theme = getVehicleRouteTheme(driver.vehicleType);
     const driverLat = driver.lat || 15.3694;
     const driverLng = driver.lng || 44.1910;
 
@@ -343,8 +506,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     if (!order && (driver.assignedOrdersCount || 0) > 0) {
       const roadDistKm = 3.6; // Realistic distance e.g. 3.6 km
       const localVehicles = getLocalVehicles();
-      const isTruck = driver.vehicleType?.includes('شاحنة') || driver.vehicleType?.includes('دينا') || driver.vehicleType === 'Truck';
-      const isCar = driver.vehicleType?.includes('سيارة') || driver.vehicleType?.includes('باص') || driver.vehicleType === 'Car';
+      const isTruck = theme.category === 'truck';
+      const isCar = theme.category === 'car';
       const matchedVehicle = isTruck 
         ? (localVehicles.find(v => v.id === 'veh-truck') || localVehicles[2])
         : isCar
@@ -403,16 +566,16 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       pickupMarkerRef.current = pMarker;
     }
 
-    // 2. Draw Customer Dropoff Destination Marker
+    // 2. Draw Customer Dropoff Destination Marker with Vehicle Theming
     const destIcon = L.divIcon({
       html: `
         <div class="relative flex items-center justify-center">
-          <div class="absolute -inset-3 rounded-full bg-rose-500/40 animate-ping"></div>
-          <div class="w-10 h-10 rounded-full bg-rose-600 border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-base">
-            📍
+          <div class="absolute -inset-3 rounded-full animate-ping opacity-60" style="background-color: ${theme.primaryColor};"></div>
+          <div class="w-10 h-10 rounded-full border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-base" style="background-color: ${theme.primaryColor};">
+            🎯
           </div>
-          <div class="absolute -bottom-7 bg-slate-900 text-amber-300 text-[10px] font-extrabold px-2 py-0.5 rounded shadow-xl whitespace-nowrap border border-rose-500">
-            🎯 وجهة التسليم: ${order.customerName.split(' ')[0]}
+          <div class="absolute -bottom-7 bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded shadow-xl whitespace-nowrap border" style="border-color: ${theme.primaryColor};">
+            <span>${theme.iconEmoji} وجهة: ${order.customerName.split(' ')[0]}</span>
           </div>
         </div>
       `,
@@ -424,16 +587,21 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     const dMarker = L.marker([order.destLat, order.destLng], { icon: destIcon }).addTo(map);
     dMarker.bindPopup(`
       <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
-        <div class="font-extrabold text-xs text-rose-600 mb-1">🎯 وجهة تسليم الطلب (${order.orderNumber})</div>
+        <div class="font-extrabold text-xs mb-1 flex items-center gap-1" style="color: ${theme.primaryColor};">
+          <span>${theme.iconEmoji}</span>
+          <span>مسار تسليم ${theme.nameAr} (${order.orderNumber})</span>
+        </div>
         <div class="text-xs text-slate-900 font-bold">👤 المستلم: ${order.customerName}</div>
         <div class="text-[10px] text-slate-600 font-mono mb-1">📞 ${order.customerPhone}</div>
         <div class="text-[11px] text-slate-700 border-t pt-1 border-slate-200">📍 ${order.dropoffAddress}</div>
-        <div class="mt-1.5 text-[10px] text-emerald-800 font-bold bg-emerald-50 p-1.5 rounded border border-emerald-200">⏱️ الوقت المقدر للوصول: ${order.estimatedMinutes || 10} دقيقة (${order.distanceKm || 3} كم)</div>
+        <div class="mt-1.5 text-[10px] font-bold p-1.5 rounded border" style="background-color: ${theme.glowColor}; border-color: ${theme.primaryColor}; color: #0f172a;">
+          ⏱️ الوقت المقدر: ${order.estimatedMinutes || 10} دقيقة (${order.distanceKm || 3} كم) | الكابتن: ${driver.name}
+        </div>
       </div>
     `);
     destMarkerRef.current = dMarker;
 
-    // 3. Draw Active Delivery Polyline Route
+    // 3. Draw Active Delivery Polyline Route (Dual layer: Glow + Sharp Colored Polyline)
     const routePoints: L.LatLngExpression[] = [];
     if (order.pickupLat && order.pickupLng) {
       routePoints.push([order.pickupLat, order.pickupLng]);
@@ -441,11 +609,20 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     routePoints.push([driverLat, driverLng]);
     routePoints.push([order.destLat, order.destLng]);
 
+    // Layer 1: Ambient Glow
+    const glowPolyline = L.polyline(routePoints, {
+      color: theme.primaryColor,
+      weight: theme.weight + 6,
+      opacity: 0.35
+    }).addTo(map);
+    deliveryGlowPolylineRef.current = glowPolyline;
+
+    // Layer 2: Main Vehicle-Themed Route Polyline
     const polyline = L.polyline(routePoints, {
-      color: '#f59e0b', // Vibrant Amber Delivery Route Line
-      weight: 5,
-      opacity: 0.9,
-      dashArray: '10, 8'
+      color: theme.primaryColor,
+      weight: theme.weight,
+      opacity: 0.95,
+      dashArray: theme.dashArray
     }).addTo(map);
 
     deliveryPolylineRef.current = polyline;
@@ -455,7 +632,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     map.fitBounds(polyline.getBounds(), { padding: [80, 80] });
   };
 
-  // Fetch or Generate Driver 2-Hour Trajectory Path from Firestore
+  // Fetch or Generate Driver 2-Hour Trajectory Path from Firestore with Vehicle Color Theme
   const handleLoadDriverTrail = async (driver: DriverUser) => {
     if (!driver || !leafletMapRef.current) return;
     setIsLoadingTrail(true);
@@ -464,6 +641,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     clearDriverPath();
 
     const map = leafletMapRef.current;
+    const theme = getVehicleRouteTheme(driver.vehicleType);
     const driverLat = driver.lat || 15.3694;
     const driverLng = driver.lng || 44.1910;
     const twoHoursAgoTime = Date.now() - (2 * 60 * 60 * 1000);
@@ -524,14 +702,21 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         }
       }
 
-      // Draw Path Polyline on Map
+      // Draw Path Polyline on Map using Vehicle Color Theme
       const latLngs: L.LatLngExpression[] = recentPoints.map(p => [p.lat, p.lng]);
       
+      const glowPolyline = L.polyline(latLngs, {
+        color: theme.primaryColor,
+        weight: theme.weight + 5,
+        opacity: 0.3
+      }).addTo(map);
+      polylineGlowRef.current = glowPolyline;
+
       const polyline = L.polyline(latLngs, {
-        color: '#2563eb', // Vibrant Blue Path
-        weight: 5,
-        opacity: 0.85,
-        dashArray: '8, 10'
+        color: theme.primaryColor, // Dynamic: Green for Bike, Blue for Car, Purple for Truck
+        weight: theme.weight,
+        opacity: 0.9,
+        dashArray: theme.dashArray
       }).addTo(map);
 
       polylineRef.current = polyline;
@@ -541,8 +726,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         const startPt = recentPoints[0];
         const startIcon = L.divIcon({
           html: `
-            <div class="bg-indigo-600 text-white font-bold text-[10px] px-2 py-1 rounded-full shadow-lg border-2 border-white whitespace-nowrap flex items-center gap-1">
-              <span>🏁 بداية المسار</span>
+            <div class="text-white font-bold text-[10px] px-2 py-1 rounded-full shadow-lg border-2 border-white whitespace-nowrap flex items-center gap-1" style="background-color: ${theme.primaryColor};">
+              <span>🏁 بداية مسار (${theme.nameAr})</span>
               <span class="opacity-80 font-mono">(${new Date(startPt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })})</span>
             </div>
           `,
@@ -557,14 +742,14 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         recentPoints.forEach((pt, idx) => {
           if (idx > 0 && idx < recentPoints.length - 1) {
             const nodeIcon = L.divIcon({
-              html: `<div class="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-xs"></div>`,
+              html: `<div class="w-3.5 h-3.5 rounded-full border-2 border-white shadow-xs" style="background-color: ${theme.primaryColor};"></div>`,
               className: 'custom-path-node-icon',
-              iconAnchor: [6, 6]
+              iconAnchor: [7, 7]
             });
 
             const nodeMarker = L.marker([pt.lat, pt.lng], { icon: nodeIcon }).addTo(map);
             const timeFormatted = new Date(pt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' });
-            nodeMarker.bindTooltip(`الساعة: ${timeFormatted} | السرعة: ${pt.speed || 0} كم/س`, { direction: 'top' });
+            nodeMarker.bindTooltip(`الساعة: ${timeFormatted} | السرعة: ${pt.speed || 0} كم/س | ${theme.nameAr}`, { direction: 'top' });
             trailMarkersRef.current.push(nodeMarker);
           }
         });
@@ -578,7 +763,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       setActiveTrailPoints(recentPoints);
       setIsLoadingTrail(false);
 
-      onShowToast?.(`تم رسم مسار تحركات الكابتن "${driver.name}" خلال آخر ساعتين (${recentPoints.length} نقاط مسجلة)`, 'success');
+      onShowToast?.(`تم رسم مسار ${theme.iconEmoji} ${theme.nameAr} للكابتن "${driver.name}" (${recentPoints.length} نقاط)`, 'success');
     } catch (err: any) {
       console.error('Error fetching driver location trail:', err);
       setIsLoadingTrail(false);
@@ -673,6 +858,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     filteredDrivers.forEach(driver => {
       const lat = driver.lat || 15.3694;
       const lng = driver.lng || 44.1910;
+      const theme = getVehicleRouteTheme(driver.vehicleType);
 
       // Determine marker color and pulse styling
       const isOnline = driver.isOnline && driver.status === 'active';
@@ -680,15 +866,12 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       const isAvailable = isOnline && !isBusy;
 
       const markerHtml = `
-        <div class="relative flex items-center justify-center">
-          ${isAvailable ? `<div class="absolute -inset-2.5 rounded-full bg-emerald-500/50 animate-ping"></div>` : isOnline ? `<div class="absolute -inset-2 rounded-full bg-amber-400/40 animate-ping"></div>` : ''}
-          <div class="w-10 h-10 rounded-full border-2 ${
-            !isOnline ? 'bg-slate-700 border-slate-400 text-slate-200' :
-            isBusy ? 'bg-amber-500 border-amber-300 text-white' : 'bg-emerald-600 border-emerald-300 text-white shadow-emerald-500/50'
-          } shadow-lg flex items-center justify-center font-bold text-xs">
-            ${driver.vehicleType?.includes('دراجة') ? '🛵' : '🚗'}
+        <div class="relative flex items-center justify-center cursor-pointer transition-transform hover:scale-110">
+          ${isAvailable ? `<div class="absolute -inset-2.5 rounded-full animate-ping opacity-60" style="background-color: ${theme.primaryColor};"></div>` : isOnline ? `<div class="absolute -inset-2 rounded-full bg-amber-400/40 animate-ping"></div>` : ''}
+          <div class="w-10 h-10 rounded-full border-2 text-white shadow-lg flex items-center justify-center font-bold text-xs" style="background-color: ${!isOnline ? '#334155' : theme.primaryColor}; border-color: ${!isOnline ? '#64748b' : '#ffffff'}; box-shadow: 0 4px 14px ${theme.glowColor};">
+            ${theme.iconEmoji}
           </div>
-          <div class="absolute -bottom-5 ${isAvailable ? 'bg-emerald-950 border-emerald-400 text-emerald-300' : 'bg-slate-900/90 text-white border-slate-700'} text-[10px] font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap border">
+          <div class="absolute -bottom-5 text-[10px] font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap border text-white" style="background-color: #0f172a; border-color: ${theme.primaryColor};">
             ${driver.name.split(' ')[0] || 'مندوب'} ${isAvailable ? '⚡ متاح' : ''}
           </div>
         </div>
@@ -707,8 +890,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       const popupHtml = `
         <div class="p-2 font-sans text-right dir-rtl" dir="rtl" style="min-width: 220px;">
           <div class="flex items-center gap-2 border-b border-slate-200 pb-2 mb-2">
-            <div class="w-8 h-8 rounded-full ${isAvailable ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-xs flex items-center justify-center">
-              ${driver.name.charAt(0)}
+            <div class="w-8 h-8 rounded-full text-white font-bold text-xs flex items-center justify-center" style="background-color: ${theme.primaryColor};">
+              ${theme.iconEmoji}
             </div>
             <div>
               <h4 class="font-bold text-xs text-slate-800 m-0">${driver.name}</h4>
@@ -724,12 +907,18 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
               </span>
             </div>
             <div class="flex items-center justify-between">
-              <span>المركبة:</span>
-              <span class="font-bold text-slate-800">${driver.vehicleType || 'غير محدد'} (${driver.plateNumber || 'بدون لوحة'})</span>
+              <span>نوع المركبة والمسار:</span>
+              <span class="font-bold px-1.5 py-0.5 rounded text-[10px]" style="background-color: ${theme.glowColor}; color: #0f172a;">
+                ${theme.iconEmoji} ${theme.nameAr}
+              </span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>رقم اللوحة:</span>
+              <span class="font-bold text-slate-800 font-mono">${driver.plateNumber || 'بدون لوحة'}</span>
             </div>
             <div class="flex items-center justify-between">
               <span>الإحداثيات الحية:</span>
-              <span class="font-bold text-emerald-700 font-mono text-[10px]">${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+              <span class="font-bold font-mono text-[10px]" style="color: ${theme.primaryColor};">${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
             </div>
             <div class="flex items-center justify-between">
               <span>السرعة المباشرة:</span>
@@ -751,7 +940,137 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
       markersRef.current[driver.id] = marker;
     });
-  }, [drivers, statusFilter, searchTerm]);
+  }, [drivers, statusFilter, searchTerm, vehicleCategoryFilter]);
+
+  // Filtered drivers list for sidebar list & map rendering
+  const filteredDrivers = useMemo(() => {
+    return drivers.filter(d => {
+      const matchSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          d.phone.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      if (!matchSearch) return false;
+
+      if (vehicleCategoryFilter !== 'all') {
+        const dType = d.vehicleType || 'دراجة نارية';
+        if (vehicleCategoryFilter === 'motorcycle' && !dType.includes('دراجة') && !dType.includes('موتور') && !dType.includes('سيكل')) return false;
+        if (vehicleCategoryFilter === 'car' && !dType.includes('سيارة') && !dType.includes('صالون') && !dType.includes('تاكسي')) return false;
+        if (vehicleCategoryFilter === 'truck' && !dType.includes('شاحنة') && !dType.includes('دينا') && !dType.includes('بيك اب') && !dType.includes('باص')) return false;
+      }
+
+      if (statusFilter === 'available') {
+        return d.isOnline && d.status === 'active' && (d.assignedOrdersCount || 0) === 0;
+      }
+      if (statusFilter === 'online') return d.isOnline && d.status === 'active';
+      if (statusFilter === 'offline') return !d.isOnline;
+      if (statusFilter === 'busy') return (d.assignedOrdersCount || 0) > 0;
+
+      return true;
+    });
+  }, [drivers, searchTerm, statusFilter, vehicleCategoryFilter]);
+
+  // 4. Render All Active Fleet Routes with Vehicle-Specific Visual Differentiation
+  // 🟢 Green for Motorcycles, 🔵 Blue for Cars, 🟣 Purple for Trucks
+  useEffect(() => {
+    const map = leafletMapRef.current;
+    if (!map) return;
+
+    clearAllFleetRoutes();
+
+    if (!showAllActiveRoutes) return;
+
+    // Filter online drivers that have active delivery missions
+    const activeRouteDrivers = filteredDrivers.filter(d => 
+      d.isOnline && d.status === 'active' && ((d.assignedOrdersCount || 0) > 0 || d.activeOrder)
+    );
+
+    activeRouteDrivers.forEach(driver => {
+      // If this driver is explicitly selected, their dedicated route handles it
+      if (selectedDriver && selectedDriver.id === driver.id) return;
+
+      const theme = getVehicleRouteTheme(driver.vehicleType);
+      const driverLat = driver.lat || 15.3694;
+      const driverLng = driver.lng || 44.1910;
+
+      let order = driver.activeOrder;
+      let destLat = order?.destLat;
+      let destLng = order?.destLng;
+      let pickupLat = order?.pickupLat;
+      let pickupLng = order?.pickupLng;
+
+      if (!destLat || !destLng) {
+        destLat = driverLat + 0.013;
+        destLng = driverLng + 0.015;
+        pickupLat = driverLat - 0.005;
+        pickupLng = driverLng - 0.005;
+      }
+
+      const pts: L.LatLngExpression[] = [];
+      if (pickupLat && pickupLng) pts.push([pickupLat, pickupLng]);
+      pts.push([driverLat, driverLng]);
+      pts.push([destLat, destLng]);
+
+      if (pts.length >= 2) {
+        // 1. Glow Polyline Backdrop
+        const glowLine = L.polyline(pts, {
+          color: theme.primaryColor,
+          weight: theme.weight + 4,
+          opacity: 0.28
+        }).addTo(map);
+
+        // 2. Main Vehicle-Themed Route Polyline
+        const routeLine = L.polyline(pts, {
+          color: theme.primaryColor,
+          weight: theme.weight,
+          opacity: 0.92,
+          dashArray: theme.dashArray
+        }).addTo(map);
+
+        routeLine.bindTooltip(`
+          <div class="p-1 font-sans text-right dir-rtl" dir="rtl">
+            <span class="font-bold text-xs" style="color: ${theme.primaryColor};">${theme.iconEmoji} مسار ${theme.nameAr}</span>
+            <div class="text-[11px] font-bold text-slate-800">${driver.name}</div>
+            <div class="text-[10px] text-slate-500 font-mono">السرعة: ${driver.speed || 0} كم/س | الطلب: ${order?.orderNumber || 'FZ-Live'}</div>
+          </div>
+        `, { sticky: true, direction: 'top' });
+
+        routeLine.on('click', () => {
+          handleFocusDriverOnMap(driver);
+        });
+
+        allRoutesPolylinesRef.current.push(glowLine, routeLine);
+
+        // Dropoff destination mini pin with theme
+        if (destLat && destLng) {
+          const destMiniIcon = L.divIcon({
+            html: `
+              <div class="relative flex items-center justify-center cursor-pointer">
+                <div class="w-6 h-6 rounded-full text-white shadow-md flex items-center justify-center font-bold text-[10px] border-2 border-white" style="background-color: ${theme.primaryColor};">
+                  🎯
+                </div>
+                <div class="absolute -bottom-4 bg-slate-900 text-white text-[9px] font-bold px-1 rounded shadow whitespace-nowrap border" style="border-color: ${theme.primaryColor};">
+                  ${order?.customerName?.split(' ')[0] || driver.name.split(' ')[0]}
+                </div>
+              </div>
+            `,
+            className: 'custom-multi-dest-pin',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+
+          const dMiniMarker = L.marker([destLat, destLng], { icon: destMiniIcon }).addTo(map);
+          dMiniMarker.bindPopup(`
+            <div class="p-1.5 text-right font-sans" dir="rtl">
+              <span class="text-xs font-bold" style="color: ${theme.primaryColor};">${theme.iconEmoji} وجهة تسليم (${theme.nameAr})</span>
+              <div class="font-bold text-slate-900 text-xs">${order?.customerName || 'عميل فزعة'}</div>
+              <div class="text-[10px] text-slate-500">${order?.dropoffAddress || 'نقطة التسليم'}</div>
+              <div class="text-[10px] text-slate-600 font-mono mt-1">الكابتن: ${driver.name}</div>
+            </div>
+          `);
+          allRoutesMarkersRef.current.push(dMiniMarker);
+        }
+      }
+    });
+  }, [filteredDrivers, showAllActiveRoutes, selectedDriver]);
 
   // 4. Live Motion Simulator Effect (Demonstrates GPS movement in preview)
   useEffect(() => {
@@ -977,23 +1296,6 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       onShowToast?.('فشل تحديث الإحداثيات المباشرة في Firestore', 'error');
     }
   };
-
-  // Filtered drivers list for sidebar list & map rendering
-  const filteredDrivers = drivers.filter(d => {
-    const matchSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                        d.phone.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    if (!matchSearch) return false;
-
-    if (statusFilter === 'available') {
-      return d.isOnline && d.status === 'active' && (d.assignedOrdersCount || 0) === 0;
-    }
-    if (statusFilter === 'online') return d.isOnline && d.status === 'active';
-    if (statusFilter === 'offline') return !d.isOnline;
-    if (statusFilter === 'busy') return (d.assignedOrdersCount || 0) > 0;
-
-    return true;
-  });
 
   const availableDriversCount = drivers.filter(d => d.isOnline && d.status === 'active' && (d.assignedOrdersCount || 0) === 0).length;
   const onlineCount = drivers.filter(d => d.isOnline && d.status === 'active').length;

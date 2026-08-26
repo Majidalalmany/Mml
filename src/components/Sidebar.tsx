@@ -25,7 +25,8 @@ import {
   Plus,
   PlusCircle,
   FolderPlus,
-  Layers
+  Layers,
+  Globe
 } from 'lucide-react';
 import { TabType, AdminUser, Category, Store } from '../types';
 import { hasModulePermission, ROLE_DEFINITIONS } from '../lib/permissions';
@@ -65,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const allNavItems = [
     { id: 'dashboard' as TabType, label: 'الرئيسية (إحصائيات الموقع)', icon: LayoutDashboard },
+    { id: 'global_stores' as TabType, label: 'المتاجر العالمية (Amazon/Shein)', icon: Globe, highlight: true },
     { id: 'categories' as TabType, label: 'إدارة الفئات والخدمات', icon: Layers, count: categories.length, highlight: true },
     { id: 'restaurants' as TabType, label: 'المتاجر والأنشطة التجارية', icon: StoreIcon, count: stores.length, hasSubMenu: true },
     { id: 'delivery' as TabType, label: 'خريطة المندوبين المباشرة', icon: Truck, highlight: true },

@@ -521,8 +521,84 @@ export interface DriverUser {
 
 export interface ManfaaOrder extends FazaaOrder {}
 
+export type GlobalStoreId = 'shein' | 'amazon' | 'aliexpress';
+export type GlobalStoreCategory = 'clothing' | 'electronics' | 'beauty' | 'shoes_bags';
+
+export interface GlobalStore {
+  id: GlobalStoreId;
+  name: string;
+  nameEn: string;
+  slug: string;
+  logo: string;
+  banner: string;
+  themeColor: string;
+  badgeColor: string;
+  description: string;
+  deliveryDays: string;
+  rating: number;
+  trustedBadge: string;
+  defaultCategory: GlobalStoreCategory;
+  availableCategories: GlobalStoreCategory[];
+}
+
+export interface GlobalProductColor {
+  name: string;
+  hex: string;
+  image?: string;
+}
+
+export interface GlobalProductSpec {
+  label: string;
+  value: string;
+}
+
+export interface GlobalProduct {
+  id: string;
+  storeId: GlobalStoreId;
+  storeName: string;
+  title: string;
+  titleEn?: string;
+  description: string;
+  originalPriceUsd: number;
+  currency: string;
+  displayedPrice: number; // Calculated local price in YER using formula
+  rating: number;
+  reviewsCount: number;
+  salesCount?: number;
+  category: GlobalStoreCategory;
+  badge?: string;
+  imageUrl: string;
+  galleryImages: string[];
+  sizes: string[];
+  colors: GlobalProductColor[];
+  specs: GlobalProductSpec[];
+  inStock: boolean;
+  sourceUrl: string;
+}
+
+export interface GlobalCartItem {
+  productId: string;
+  productTitle: string;
+  storeId: GlobalStoreId;
+  storeName: string;
+  imageUrl: string;
+  selectedSize: string;
+  selectedColor: string;
+  quantity: number;
+  displayedPrice: number;
+  totalPrice: number;
+  sourceUrl: string;
+}
+
+export interface GlobalStoreConfig {
+  currencyRate: number; // Exchange rate (e.g. 535 YER per 1 USD)
+  shippingProfit: number; // Base freight & service profit in YER
+  roundTo: number; // 50
+}
+
 export type TabType = 
   | 'dashboard' 
+  | 'global_stores'
   | 'app_preview'
   | 'categories' 
   | 'products' 
@@ -540,7 +616,7 @@ export type TabType =
   | 'financial' 
   | 'admin' 
   | 'payment' 
-  | 'quality'
+  | 'quality' 
   | 'audit'
   | 'settings';
 

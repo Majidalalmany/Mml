@@ -39,6 +39,7 @@ import {
   getGlobalStoreConfig, 
   saveGlobalStoreConfig, 
   queryGlobalStoreProducts,
+  fetchGlobalStoreProductsAsync,
   getLocalCart
 } from '../../lib/globalStoreService';
 import { GlobalProductModal } from './GlobalProductModal';
@@ -99,12 +100,12 @@ export const GlobalStoresHub: React.FC<GlobalStoresHubProps> = ({
   }, [selectedStoreId]);
 
   // Fetch / Query Products Stream
-  const loadProducts = useCallback((targetPage: number = 1, append: boolean = false) => {
+  const loadProducts = useCallback(async (targetPage: number = 1, append: boolean = false) => {
     if (targetPage === 1) setIsLoading(true);
     else setIsFetchingMore(true);
 
     try {
-      const res = queryGlobalStoreProducts({
+      const res = await fetchGlobalStoreProductsAsync({
         storeId: selectedStoreId,
         category: selectedCategory,
         searchQuery: activeSearchTerm,

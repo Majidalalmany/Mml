@@ -1409,6 +1409,7 @@ export default function App() {
                     <ProductsManager 
                       products={products}
                       categories={categories}
+                      stores={stores}
                       isLoading={isLoadingProducts}
                       onAddProduct={() => {
                         setEditingProduct(null);

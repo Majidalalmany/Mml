@@ -308,6 +308,11 @@ export interface OrderItem {
   storeName?: string;
   productUrl?: string;
   sourceUrl?: string;
+  url?: string;
+  imageUrl?: string;
+  image?: string;
+  size?: string;
+  color?: string;
 }
 
 export interface Order {
@@ -316,6 +321,7 @@ export interface Order {
   orderNumber?: string;
   orderType?: string;
   orderScope?: string;
+  storeCategory?: string;
   isGlobalStore?: boolean;
   clientId?: string;
   driverId?: string | null;

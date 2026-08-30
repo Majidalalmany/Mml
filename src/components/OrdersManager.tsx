@@ -168,6 +168,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [newAddress, setNewAddress] = useState('صنعاء - شارع حدة');
   const [newNotes, setNewNotes] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [finalPriceInput, setFinalPriceInput] = useState<Record<string, string>>({});
 
   // Authorization check
   const canEditOrders = hasModulePermission(currentUser, 'orders', 'edit');
@@ -412,6 +413,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             order.status === 'approved' || 
             order.status === 'APPROVED';
           if (!isPrep) return false;
+        } else if (selectedStatusTab === 'global_stores') {
+          const isGlobal = order.orderType === 'global_store' || order.storeCategory === 'المتاجر العالمية';
+          if (!isGlobal) return false;
         } else if (order.status !== selectedStatusTab) {
           return false;
         }
@@ -880,7 +884,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 { id: 'delivering', label: `قيد التوصيل (${counts.delivering})` },
                 { id: 'delivered', label: `المكتملة (${counts.delivered})` },
                 { id: 'cancelled', label: `الملغاة (${counts.cancelled})` },
-                { id: 'returned', label: `المرجعة (${counts.returned})` }
+                { id: 'returned', label: `المرجعة (${counts.returned})` },
+                { id: 'global_stores', label: `المتاجر العالمية 🌐` }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -1032,25 +1037,66 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                     </div>
 
                     {/* Card Body Details */}
-                    <div className="p-4 space-y-3 flex-1">
-                      {/* Customer & Phone with Admin Call Action */}
-                      <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                        <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-slate-400" />
-                          <span className="font-bold text-slate-900">{order.customerName}</span>
+                    {isGlobalOrder ? (
+                      <div className="p-4 space-y-4">
+                        <div className="flex items-center justify-between bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                           <span className="font-bold text-sm text-indigo-900">{order.customerName}</span>
+                           <a href={`tel:${order.customerPhone}`} className="bg-white text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-sm">
+                             <PhoneCall className="w-3 h-3" /> {order.customerPhone || 'اتصال'}
+                           </a>
                         </div>
-                        {order.customerPhone && (
-                          <a 
-                            href={`tel:${order.customerPhone}`}
-                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 dir-ltr transition-colors border border-blue-200"
-                            title="التواصل مع العميل لتأكيد الطلب"
+                        <div className="space-y-2">
+                          <span className="text-xs font-bold text-slate-500">المنتجات المطلوبة:</span>
+                          {order.items?.map((item, idx) => (
+                             <div key={idx} className="flex gap-3 text-xs bg-slate-50 p-2 rounded-lg items-center">
+                               <img src={item.imageUrl || item.image || 'https://via.placeholder.com/60'} alt={item.productName} className="w-12 h-12 object-cover rounded-md border" />
+                               <div className="flex-1">
+                                 <p className="font-bold text-slate-800">{item.productName}</p>
+                                 <p className="text-slate-500">الكمية: {item.quantity} | اللون: {item.color || '-'} | المقاس: {item.size || '-'}</p>
+                               </div>
+                             </div>
+                          ))}
+                        </div>
+                        <a href={order.items?.[0]?.url || order.items?.[0]?.productUrl} target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-indigo-600 text-white py-2.5 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition-colors">
+                          🔗 فتح رابط المنتج في المتجر الأصلي
+                        </a>
+                        <div className="space-y-2 pt-2 border-t">
+                          <input 
+                            type="number" 
+                            placeholder="أدخل السعر النهائي المحسوب (ر.ي)" 
+                            className="w-full text-xs p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500"
+                            value={finalPriceInput[order.id] || ''}
+                            onChange={(e) => setFinalPriceInput({...finalPriceInput, [order.id]: e.target.value})}
+                          />
+                          <button 
+                            onClick={() => handleConfirmGlobalOrder(order)}
+                            disabled={updatingOrderId === order.id}
+                            className="w-full bg-emerald-600 text-white py-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md hover:bg-emerald-700 transition-colors"
                           >
-                            <Phone className="w-3 h-3 text-blue-600" />
-                            <span>{order.customerPhone}</span>
-                            <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans">تأكيد 📞</span>
-                          </a>
-                        )}
+                             {updatingOrderId === order.id ? 'جاري التأكيد...' : 'تأكيد الطلب بعد الاتصال بالعميل'}
+                          </button>
+                        </div>
                       </div>
+                    ) : (
+                      <div className="p-4 space-y-3 flex-1">
+                        {/* Customer & Phone with Admin Call Action */}
+                        <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <User className="w-4 h-4 text-slate-400" />
+                            <span className="font-bold text-slate-900">{order.customerName}</span>
+                          </div>
+                          {order.customerPhone && (
+                            <a 
+                              href={`tel:${order.customerPhone}`}
+                              className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 dir-ltr transition-colors border border-blue-200"
+                              title="التواصل مع العميل لتأكيد الطلب"
+                            >
+                              <Phone className="w-3 h-3 text-blue-600" />
+                              <span>{order.customerPhone}</span>
+                              <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans">تأكيد 📞</span>
+                            </a>
+                          )}
+                        </div>
 
                       {/* Driver & Invoice Info Badge */}
                       <div className="bg-purple-50/70 p-2.5 rounded-xl border border-purple-200 text-xs space-y-1.5">
@@ -1319,24 +1365,6 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                           ملاحظة العميل: {order.notes}
                         </div>
                       )}
-                    </div>
-
-                    {/* Card Footer */}
-                    <div className="p-3.5 bg-gray-50/90 border-t border-gray-100 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block">الإجمالي الكلي:</span>
-                        <span className="text-base font-extrabold text-slate-900 font-sans">
-                          {order.total?.toLocaleString()} <span className="text-xs font-normal text-slate-500">ر.ي</span>
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={() => setViewingOrder(order)}
-                        className="bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-gray-200 text-xs font-bold px-3 py-1.5 rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>عرض التفاصيل والسند</span>
-                      </button>
                     </div>
                   </div>
                 );

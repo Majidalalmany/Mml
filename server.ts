@@ -406,7 +406,7 @@ async function startServer() {
   // ==================== GLOBAL STORES (AMAZON, SHEIN, ALIEXPRESS) REAL API ENGINE ====================
   let globalStoresConfig = {
     currencyRate: 535, // 1 USD = 535 YER
-    shippingProfit: 4000, // Shipping and handling margin
+    shippingProfit: 1500, // Shipping and handling margin: 1,500 YER
     roundTo: 50
   };
 

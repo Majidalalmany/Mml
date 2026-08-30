@@ -178,9 +178,6 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     currentUser?.email === 'admin@gmail.com' ||
     hasModulePermission(currentUser, 'orders', 'delete');
 
-  const safeOrders = orders || [];
-  const safeStores = stores || [];
-
   // Open Review Modal and compute initial road distance, weight & suggested vehicle
   const handleOpenReviewModal = async (order: Order) => {
     setOrderToReview(order);
@@ -278,6 +275,69 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
+  // Realtime Orders Listener from Firestore 'orders' collection
+  const [liveOrders, setLiveOrders] = useState<Order[]>(orders);
+
+  useEffect(() => {
+    try {
+      const ordersQuery = query(collection(db, 'orders'));
+      const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+        const list: Order[] = snapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            orderNumber: data.orderNumber || `ORD-${docSnap.id.substring(0, 5)}`,
+            customerName: data.customerName || data.userName || 'عميل',
+            customerPhone: data.customerPhone || data.phone || '',
+            address: data.deliveryAddress || data.address || data.dropoffAddress || '',
+            storeId: data.storeId || '',
+            storeName: data.storeName || (data.items?.[0]?.storeName) || 'متجر',
+            total: data.total || data.totalPrice || data.orderTotal || 0,
+            itemsTotal: data.itemsTotal || data.subtotal || data.itemsPrice || 0,
+            deliveryFee: data.deliveryFee || data.shippingFee || 0,
+            status: (data.status || 'pending_review') as OrderStatus,
+            needsAdminReview: Boolean(
+              data.needsAdminReview || 
+              data.status === 'pending_review' || 
+              data.status === 'pending' || 
+              data.status === 'PENDING_REVIEW' || 
+              data.status === 'PENDING'
+            ),
+            itemsCount: data.itemsCount || (data.items ? data.items.length : 1),
+            items: data.items || [],
+            paymentMethod: data.paymentMethod || 'cash',
+            paymentStatus: data.paymentStatus || 'pending',
+            createdAt: data.createdAt ? (typeof data.createdAt === 'string' ? data.createdAt : data.createdAt.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+            ...data
+          } as Order;
+        });
+        if (list.length > 0) {
+          setLiveOrders(list);
+        }
+      }, (err) => {
+        console.warn('Orders onSnapshot error in OrdersManager:', err);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn('Orders listener setup error in OrdersManager:', e);
+    }
+  }, []);
+
+  // Sync prop changes when passed from App
+  useEffect(() => {
+    if (orders && orders.length > 0) {
+      setLiveOrders(prev => {
+        const map = new Map<string, Order>();
+        prev.forEach(o => map.set(o.id, o));
+        orders.forEach(o => map.set(o.id, o));
+        return Array.from(map.values());
+      });
+    }
+  }, [orders]);
+
+  const safeOrders = liveOrders.length > 0 ? liveOrders : (orders || []);
+  const safeStores = stores || [];
+
   // Firestore Realtime Drivers Listener
   useEffect(() => {
     try {
@@ -317,7 +377,19 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       // Status filter
       if (selectedStatusTab !== 'all') {
         if (selectedStatusTab === 'pending_review') {
-          if (order.status !== 'pending_review' && order.status !== 'PENDING_REVIEW' && !order.needsAdminReview) return false;
+          const isPending = 
+            order.status === 'pending_review' || 
+            order.status === 'PENDING_REVIEW' || 
+            order.status === 'pending' || 
+            order.status === 'PENDING' || 
+            Boolean(order.needsAdminReview);
+          if (!isPending) return false;
+        } else if (selectedStatusTab === 'new') {
+          const isNew = (order.status === 'new' || order.status === 'NEW') && !order.needsAdminReview;
+          if (!isNew) return false;
+        } else if (selectedStatusTab === 'preparing') {
+          const isPrep = order.status === 'preparing' || order.status === 'PREPARING' || order.status === 'approved' || order.status === 'APPROVED';
+          if (!isPrep) return false;
         } else if (order.status !== selectedStatusTab) {
           return false;
         }
@@ -372,12 +444,18 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const counts = useMemo(() => {
     return {
       all: safeOrders.length,
-      pending_review: safeOrders.filter(o => o.status === 'pending_review' || o.status === 'PENDING_REVIEW' || o.needsAdminReview).length,
-      new: safeOrders.filter(o => o.status === 'new' && !o.needsAdminReview).length,
-      preparing: safeOrders.filter(o => o.status === 'preparing' || o.status === 'approved' || o.status === 'APPROVED').length,
-      delivering: safeOrders.filter(o => o.status === 'delivering').length,
-      delivered: safeOrders.filter(o => o.status === 'delivered').length,
-      cancelled: safeOrders.filter(o => o.status === 'cancelled').length,
+      pending_review: safeOrders.filter(o => 
+        o.status === 'pending_review' || 
+        o.status === 'PENDING_REVIEW' || 
+        o.status === 'pending' || 
+        o.status === 'PENDING' || 
+        o.needsAdminReview
+      ).length,
+      new: safeOrders.filter(o => (o.status === 'new' || o.status === 'NEW') && !o.needsAdminReview).length,
+      preparing: safeOrders.filter(o => o.status === 'preparing' || o.status === 'PREPARING' || o.status === 'approved' || o.status === 'APPROVED').length,
+      delivering: safeOrders.filter(o => o.status === 'delivering' || o.status === 'DELIVERING').length,
+      delivered: safeOrders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').length,
+      cancelled: safeOrders.filter(o => o.status === 'cancelled' || o.status === 'CANCELLED').length,
       returned: safeOrders.filter(o => o.status === 'returned').length
     };
   }, [safeOrders]);

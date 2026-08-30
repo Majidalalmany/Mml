@@ -226,6 +226,8 @@ export interface QualityReview {
 export type OrderStatus = 
   | 'PENDING_REVIEW'
   | 'pending_review'
+  | 'PENDING'
+  | 'pending'
   | 'APPROVED'
   | 'approved'
   | 'NEW'

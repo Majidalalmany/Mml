@@ -3,7 +3,7 @@ import { db, collection, addDoc } from './firebase';
 
 export const DEFAULT_GLOBAL_CONFIG: GlobalStoreConfig = {
   currencyRate: 535, // 1 USD = 535 YER (Standard trade rate)
-  shippingProfit: 4000, // Base freight + service profit in YER
+  shippingProfit: 1500, // Shipping and handling margin: 1,500 YER
   roundTo: 50
 };
 
@@ -743,7 +743,8 @@ export const submitGlobalStoreOrder = async (payload: {
     deliveryAddress: `${payload.deliveryCity} - ${payload.deliveryAddress}`.trim(),
     pickupAddress: `مستودعات الشحن الدولي (${payload.items.map(i => i.storeName).filter((v, i, a) => a.indexOf(v) === i).join(', ')})`,
     orderType: `طلب متجر عالمي (${payload.items.length} أصناف)`,
-    status: 'new',
+    status: 'pending_review',
+    needsAdminReview: true,
     items: payload.items.map(item => ({
       name: item.productTitle,
       productName: item.productTitle,

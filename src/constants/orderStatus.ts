@@ -4,6 +4,8 @@ import { Clock, Utensils, Truck, CheckCircle2, XCircle, RotateCcw, ClipboardChec
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   PENDING_REVIEW: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
   pending_review: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
+  PENDING: 'قيد المراجعة والتدقيق',
+  pending: 'قيد المراجعة والتدقيق',
   APPROVED: 'تمت الموافقة وتأكيد تكلفة التوصيل',
   approved: 'تمت الموافقة وتأكيد تكلفة التوصيل',
   NEW: 'طلب جديد',
@@ -37,6 +39,22 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
   },
   pending_review: {
     label: 'قيد المراجعة وتحديد وسيلة النقل',
+    badgeClass: 'bg-orange-100 text-orange-950 border-orange-300',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
+    borderColor: 'border-orange-300',
+    Icon: ClipboardCheck
+  },
+  PENDING: {
+    label: 'قيد المراجعة',
+    badgeClass: 'bg-orange-100 text-orange-950 border-orange-300',
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
+    borderColor: 'border-orange-300',
+    Icon: ClipboardCheck
+  },
+  pending: {
+    label: 'قيد المراجعة',
     badgeClass: 'bg-orange-100 text-orange-950 border-orange-300',
     iconBg: 'bg-orange-50',
     iconColor: 'text-orange-600',

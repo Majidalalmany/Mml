@@ -36,7 +36,9 @@ import {
   Calculator,
   Sliders,
   Scale,
-  Zap
+  Zap,
+  Globe,
+  PhoneCall
 } from 'lucide-react';
 import { Order, OrderStatus, Store, AdminUser, DriverUser, VehicleType } from '../types';
 import { hasModulePermission } from '../lib/permissions';
@@ -284,6 +286,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
         const list: Order[] = snapshot.docs.map(docSnap => {
           const data = docSnap.data();
+          const isGlobal = Boolean(
+            data.orderType === 'global_store' ||
+            data.orderType?.includes?.('global_store') ||
+            data.orderType?.includes?.('متجر عالمي') ||
+            data.orderScope === 'international' ||
+            data.serviceType === 'global_store' ||
+            data.isGlobalStore
+          );
+
           return {
             id: docSnap.id,
             orderNumber: data.orderNumber || `ORD-${docSnap.id.substring(0, 5)}`,
@@ -291,11 +302,11 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             customerPhone: data.customerPhone || data.phone || '',
             address: data.deliveryAddress || data.address || data.dropoffAddress || '',
             storeId: data.storeId || '',
-            storeName: data.storeName || (data.items?.[0]?.storeName) || 'متجر',
+            storeName: isGlobal ? 'طلب متجر عالمي' : (data.storeName || (data.items?.[0]?.storeName) || 'متجر عام'),
             total: data.total || data.totalPrice || data.orderTotal || 0,
             itemsTotal: data.itemsTotal || data.subtotal || data.itemsPrice || 0,
             deliveryFee: data.deliveryFee || data.shippingFee || 0,
-            status: (data.status || 'pending_review') as OrderStatus,
+            status: (data.status || 'pending') as OrderStatus,
             needsAdminReview: Boolean(
               data.needsAdminReview || 
               data.status === 'pending_review' || 
@@ -311,9 +322,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             ...data
           } as Order;
         });
-        if (list.length > 0) {
-          setLiveOrders(list);
-        }
+        setLiveOrders(list);
       }, (err) => {
         console.warn('Orders onSnapshot error in OrdersManager:', err);
       });
@@ -385,10 +394,23 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             Boolean(order.needsAdminReview);
           if (!isPending) return false;
         } else if (selectedStatusTab === 'new') {
-          const isNew = (order.status === 'new' || order.status === 'NEW') && !order.needsAdminReview;
+          const isNew = 
+            order.status === 'new' || 
+            order.status === 'NEW' || 
+            order.status === 'pending' || 
+            order.status === 'PENDING' || 
+            order.status === 'pending_review' || 
+            order.status === 'PENDING_REVIEW' || 
+            Boolean(order.needsAdminReview);
           if (!isNew) return false;
         } else if (selectedStatusTab === 'preparing') {
-          const isPrep = order.status === 'preparing' || order.status === 'PREPARING' || order.status === 'approved' || order.status === 'APPROVED';
+          const isPrep = 
+            order.status === 'preparing' || 
+            order.status === 'PREPARING' || 
+            order.status === 'confirmed' || 
+            order.status === 'CONFIRMED' || 
+            order.status === 'approved' || 
+            order.status === 'APPROVED';
           if (!isPrep) return false;
         } else if (order.status !== selectedStatusTab) {
           return false;
@@ -451,8 +473,23 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         o.status === 'PENDING' || 
         o.needsAdminReview
       ).length,
-      new: safeOrders.filter(o => (o.status === 'new' || o.status === 'NEW') && !o.needsAdminReview).length,
-      preparing: safeOrders.filter(o => o.status === 'preparing' || o.status === 'PREPARING' || o.status === 'approved' || o.status === 'APPROVED').length,
+      new: safeOrders.filter(o => 
+        o.status === 'new' || 
+        o.status === 'NEW' || 
+        o.status === 'pending' || 
+        o.status === 'PENDING' || 
+        o.status === 'pending_review' || 
+        o.status === 'PENDING_REVIEW' || 
+        o.needsAdminReview
+      ).length,
+      preparing: safeOrders.filter(o => 
+        o.status === 'preparing' || 
+        o.status === 'PREPARING' || 
+        o.status === 'confirmed' || 
+        o.status === 'CONFIRMED' || 
+        o.status === 'approved' || 
+        o.status === 'APPROVED'
+      ).length,
       delivering: safeOrders.filter(o => o.status === 'delivering' || o.status === 'DELIVERING').length,
       delivered: safeOrders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').length,
       cancelled: safeOrders.filter(o => o.status === 'cancelled' || o.status === 'CANCELLED').length,
@@ -482,6 +519,37 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       await onUpdateOrderStatus(orderId, newStatus);
     } catch (err) {
       console.error('Failed updating order status:', err);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  // Handler for Admin to confirm order after calling the customer
+  const handleConfirmOrderAfterCall = async (order: Order) => {
+    if (!canEditOrders) return;
+    try {
+      setUpdatingOrderId(order.id);
+      const nowIso = new Date().toISOString();
+      const adminName = currentUser?.name || 'مدير النظام';
+      await onUpdateOrderStatus(order.id, 'confirmed', {
+        status: 'confirmed',
+        needsAdminReview: false,
+        confirmedByAdminAt: nowIso,
+        confirmedByAdminName: adminName,
+        adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`
+      });
+
+      // Update local state directly
+      setLiveOrders(prev => prev.map(o => o.id === order.id ? {
+        ...o,
+        status: 'confirmed',
+        needsAdminReview: false,
+        confirmedByAdminAt: nowIso,
+        confirmedByAdminName: adminName
+      } : o));
+    } catch (err) {
+      console.error('Failed confirming order after call:', err);
+      alert('حدث خطأ أثناء تأكيد الطلب، يرجى المحاولة مرة أخرى.');
     } finally {
       setUpdatingOrderId(null);
     }
@@ -887,6 +955,16 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
                 const StatusIcon = statusConfig.Icon;
 
+                const isGlobalOrder = Boolean(
+                  order.orderType === 'global_store' ||
+                  order.orderType?.includes('global_store') ||
+                  order.orderType?.includes('متجر عالمي') ||
+                  order.orderScope === 'international' ||
+                  order.serviceType === 'global_store' ||
+                  order.isGlobalStore ||
+                  (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
+                );
+
                 return (
                   <div 
                     key={order.id}
@@ -900,9 +978,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                         </span>
                         <div>
                           <span className="text-xs font-bold text-slate-800 block">
-                            {order.storeName || 'متجر عام'}
+                            {isGlobalOrder ? (
+                              <span className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-900 border border-indigo-200 px-2 py-0.5 rounded-lg font-bold">
+                                <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span>طلب متجر عالمي</span>
+                                {order.items && order.items.length > 0 && order.items[0]?.storeName && (
+                                  <span className="text-[10px] text-indigo-700 bg-white px-1.5 py-0.2 rounded border border-indigo-100 font-sans">
+                                    {Array.from(new Set(order.items.map(i => i.storeName).filter(Boolean))).join(' / ') || order.storeName}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              order.storeName || 'متجر عام'
+                            )}
                           </span>
-                          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono mt-0.5">
                             <Calendar className="w-3 h-3 text-slate-400" />
                             {order.createdAt ? new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
                           </span>
@@ -920,6 +1010,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                               className={`text-xs font-bold px-3 py-1.5 rounded-xl border cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs transition-all ${statusConfig.badgeClass}`}
                             >
                               <option value="new">🟡 جديد (بانتظار التأكيد)</option>
+                              <option value="pending">🟠 قيد المراجعة والتدقيق</option>
+                              <option value="confirmed">🟢 تم التأكيد هاتفياً</option>
                               <option value="preparing">🔵 قيد التحضير (تحديد مندوب)</option>
                               <option value="delivering">🟣 قيد التوصيل</option>
                               <option value="delivered">🟢 مكتمل / تم التسليم</option>
@@ -1035,31 +1127,88 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                         </div>
                       )}
 
-                      {/* Real-world Road Distance & Map Verification Button (Requirement 2) */}
-                      <div className="flex items-center justify-between bg-blue-50/80 p-2.5 rounded-xl border border-blue-200 text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <Navigation className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span className="text-slate-700 font-medium">المسافة الطرقية:</span>
-                          <strong className="font-mono text-blue-900 font-extrabold text-xs">
-                            {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم` : '3.5 كم'}
-                          </strong>
-                          {order.airDistanceKm && (
-                            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                              ({order.airDistanceKm} كم خط هوائي)
+                      {/* Real-world Road Distance vs Global Store International Shipping (UI Fallback) */}
+                      {isGlobalOrder ? (
+                        <div className="flex items-center justify-between bg-indigo-50/80 p-2.5 rounded-xl border border-indigo-200 text-xs">
+                          <div className="flex items-center gap-1.5 text-indigo-900">
+                            <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
+                            <span className="font-bold">شحن ومناولة دولية:</span>
+                            <span className="text-slate-600 text-[11px]">مستودعات الشحن الخارجي ✈️ ⬅ توصيل لعنوان العميل</span>
+                          </div>
+                          <span className="text-[10px] bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-md">
+                            شحن عالمي
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between bg-blue-50/80 p-2.5 rounded-xl border border-blue-200 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <Navigation className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span className="text-slate-700 font-medium">المسافة الطرقية:</span>
+                            <strong className="font-mono text-blue-900 font-extrabold text-xs">
+                              {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم` : '3.5 كم'}
+                            </strong>
+                            {order.airDistanceKm && (
+                              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                                ({order.airDistanceKm} كم خط هوائي)
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setVerificationOrder(order)}
+                            className="bg-white hover:bg-blue-600 hover:text-white text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs cursor-pointer shrink-0"
+                            title="معاينة مسار الشوارع الفعلي ونقطتي المتجر والعميل ومطابقة المسافة"
+                          >
+                            <MapPin className="w-3 h-3 text-blue-500 hover:text-white" />
+                            <span>📍 معاينة النقطتين على الخريطة</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Admin Confirmation Action (Phone Call Workflow) */}
+                      {canEditOrders && (
+                        <div className="bg-emerald-50 border border-emerald-300 p-3 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                              <PhoneCall className="w-4 h-4 text-emerald-600 animate-pulse" />
+                              <span>تأكيد الإدارة بعد الاتصال بالعميل</span>
                             </span>
+                            {order.confirmedByAdminAt ? (
+                              <span className="text-[10px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-md font-bold">
+                                تم التأكيد هاتفياً ✅
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-bold">
+                                بانتظار التأكيد 📞
+                              </span>
+                            )}
+                          </div>
+                          
+                          {!order.confirmedByAdminAt && (
+                            <button
+                              type="button"
+                              disabled={updatingOrderId === order.id}
+                              onClick={() => handleConfirmOrderAfterCall(order)}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs hover:shadow cursor-pointer"
+                              title="تأكيد تفاصيل الطلب مع العميل ونقله للمرحلة التالية"
+                            >
+                              {updatingOrderId === order.id ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                              ) : (
+                                <PhoneCall className="w-4 h-4 text-emerald-100" />
+                              )}
+                              <span>تأكيد الطلب بعد الاتصال بالعميل</span>
+                            </button>
+                          )}
+
+                          {order.confirmedByAdminAt && (
+                            <p className="text-[11px] text-emerald-800">
+                              تم تأكيد الطلب هاتفياً بواسطة <strong>{order.confirmedByAdminName || 'الإدارة'}</strong> في {new Date(order.confirmedByAdminAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}.
+                            </p>
                           )}
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setVerificationOrder(order)}
-                          className="bg-white hover:bg-blue-600 hover:text-white text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs cursor-pointer shrink-0"
-                          title="معاينة مسار الشوارع الفعلي ونقطتي المتجر والعميل ومطابقة المسافة"
-                        >
-                          <MapPin className="w-3 h-3 text-blue-500 hover:text-white" />
-                          <span>📍 معاينة النقطتين على الخريطة</span>
-                        </button>
-                      </div>
+                      )}
 
                       {/* Review & Vehicle Assignment Prominent Banner */}
                       {(order.needsAdminReview || rawStatus === 'pending_review' || order.status === 'PENDING_REVIEW') && (

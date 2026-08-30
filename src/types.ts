@@ -228,6 +228,8 @@ export type OrderStatus =
   | 'pending_review'
   | 'PENDING'
   | 'pending'
+  | 'CONFIRMED'
+  | 'confirmed'
   | 'APPROVED'
   | 'approved'
   | 'NEW'
@@ -303,12 +305,18 @@ export interface OrderItem {
   weightKg?: number;
   options?: string[];
   notes?: string;
+  storeName?: string;
+  productUrl?: string;
+  sourceUrl?: string;
 }
 
 export interface Order {
   id: string;
   orderId?: string;
   orderNumber?: string;
+  orderType?: string;
+  orderScope?: string;
+  isGlobalStore?: boolean;
   clientId?: string;
   driverId?: string | null;
   driverName?: string | null;
@@ -342,9 +350,11 @@ export interface Order {
   reviewedByAdminName?: string;
   reviewedAt?: string;
   adminReviewNotes?: string;
+  confirmedByAdminAt?: string;
+  confirmedByAdminName?: string;
   routingMethod?: 'google_routes_api' | 'road_network_topology';
   status: OrderStatus;
-  serviceType?: 'regular' | 'manfaah' | 'fazaa';
+  serviceType?: 'regular' | 'manfaah' | 'fazaa' | 'global_store' | string;
   itemsCount: number;
   items?: OrderItem[];
   deliveryType?: 'delivery' | 'pickup';

@@ -955,26 +955,27 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredOrders.map((order) => {
-                const rawStatus = order.status;
-                const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
-                const StatusIcon = statusConfig.Icon;
+              {filteredOrders.map((order) => (
+                (() => {
+                  const rawStatus = order.status;
+                  const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
+                  const StatusIcon = statusConfig.Icon;
 
-                const isGlobalOrder = Boolean(
-                  order.orderType === 'global_store' ||
-                  order.orderType?.includes('global_store') ||
-                  order.orderType?.includes('متجر عالمي') ||
-                  order.orderScope === 'international' ||
-                  order.serviceType === 'global_store' ||
-                  order.isGlobalStore ||
-                  (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
-                );
+                  const isGlobalOrder = Boolean(
+                    order.orderType === 'global_store' ||
+                    order.orderType?.includes('global_store') ||
+                    order.orderType?.includes('متجر عالمي') ||
+                    order.orderScope === 'international' ||
+                    order.serviceType === 'global_store' ||
+                    order.isGlobalStore ||
+                    (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
+                  );
 
-                return (
-                  <div 
-                    key={order.id}
-                    className={`bg-white rounded-2xl border ${statusConfig.borderColor} shadow-xs hover:shadow-md transition-all overflow-hidden flex flex-col justify-between`}
-                  >
+                  return (
+                    <div 
+                      key={order.id}
+                      className={`bg-white rounded-2xl border ${statusConfig.borderColor} shadow-xs hover:shadow-md transition-all overflow-hidden flex flex-col justify-between`}
+                    >
                     {/* Card Header */}
                     <div className="p-4 bg-slate-50/60 border-b border-gray-100 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5">
@@ -1365,14 +1366,12 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                           ملاحظة العميل: {order.notes}
                         </div>
                       )}
+
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
+                  );
+                })}
+              </div>
+            )}
 
       {/* ==================== VIEW MODE 2: DRIVER APP INTERFACE ==================== */}
       {activeViewMode === 'driver' && (

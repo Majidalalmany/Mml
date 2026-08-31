@@ -559,6 +559,45 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
+  // Handler for Admin to confirm global store order with final price input
+  const handleConfirmGlobalOrder = async (order: Order) => {
+    if (!canEditOrders) return;
+    const finalPrice = parseFloat(finalPriceInput[order.id]);
+    if (!finalPrice || isNaN(finalPrice) || finalPrice <= 0) {
+      alert('يرجى إدخال السعر النهائي المحسوب (ر.ي) قبل تأكيد الطلب.');
+      return;
+    }
+    try {
+      setUpdatingOrderId(order.id);
+      const nowIso = new Date().toISOString();
+      const adminName = currentUser?.name || 'مدير النظام';
+      await onUpdateOrderStatus(order.id, 'confirmed', {
+        status: 'confirmed',
+        total: finalPrice,
+        totalPrice: finalPrice,
+        needsAdminReview: false,
+        confirmedByAdminAt: nowIso,
+        confirmedByAdminName: adminName,
+        adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`
+      });
+
+      setLiveOrders(prev => prev.map(o => o.id === order.id ? {
+        ...o,
+        status: 'confirmed',
+        total: finalPrice,
+        totalPrice: finalPrice,
+        needsAdminReview: false,
+        confirmedByAdminAt: nowIso,
+        confirmedByAdminName: adminName
+      } : o));
+    } catch (err) {
+      console.error('Failed confirming global order:', err);
+      alert('حدث خطأ أثناء تأكيد الطلب، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
   // Handler when Admin assigns a driver and accepts order
   const handleAssignDriverSubmit = async (driver: DriverUser) => {
     if (!orderToAssign) return;
@@ -955,9 +994,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredOrders.map((order) => (
-                (() => {
-                  const rawStatus = order.status;
+              {filteredOrders.map((order) => {
+                const rawStatus = order.status;
                   const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
                   const StatusIcon = statusConfig.Icon;
 
@@ -1366,12 +1404,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                           ملاحظة العميل: {order.notes}
                         </div>
                       )}
-
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    )}
 
       {/* ==================== VIEW MODE 2: DRIVER APP INTERFACE ==================== */}
       {activeViewMode === 'driver' && (

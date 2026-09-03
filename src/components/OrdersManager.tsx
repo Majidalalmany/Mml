@@ -295,8 +295,17 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             data.orderType?.includes?.('متجر عالمي') ||
             data.orderScope === 'international' ||
             data.serviceType === 'global_store' ||
-            data.isGlobalStore
+            data.isGlobalStore ||
+            data.categoryId === 'global_stores' ||
+            data.categoryId === 'cat-global' ||
+            data.categoryName === 'المتاجر العالمية' ||
+            data.storeCategory === 'المتاجر العالمية'
           );
+
+          let storeName = data.storeName || (data.items?.[0]?.storeName);
+          if (!storeName || storeName === 'متجر عام') {
+            storeName = isGlobal ? 'المتاجر العالمية' : 'متجر عام';
+          }
 
           return {
             id: docSnap.id,
@@ -304,8 +313,12 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             customerName: data.customerName || data.userName || 'عميل',
             customerPhone: data.customerPhone || data.phone || '',
             address: data.deliveryAddress || data.address || data.dropoffAddress || '',
-            storeId: data.storeId || '',
-            storeName: isGlobal ? 'طلب متجر عالمي' : (data.storeName || (data.items?.[0]?.storeName) || 'متجر عام'),
+            storeId: data.storeId || (isGlobal ? 'global-store-amazon' : ''),
+            storeName,
+            categoryId: data.categoryId || (isGlobal ? 'global_stores' : ''),
+            categoryName: data.categoryName || (isGlobal ? 'المتاجر العالمية' : ''),
+            storeCategory: data.storeCategory || (isGlobal ? 'المتاجر العالمية' : ''),
+            isGlobalStore: isGlobal || Boolean(data.isGlobalStore),
             total: data.total || data.totalPrice || data.orderTotal || 0,
             itemsTotal: data.itemsTotal || data.subtotal || data.itemsPrice || 0,
             deliveryFee: data.deliveryFee || data.shippingFee || 0,
@@ -325,11 +338,39 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             ...data
           } as Order;
         });
-        setLiveOrders(list);
+
+        // Merge with local storage orders (e.g. offline/fallback global orders)
+        try {
+          const localOrders: Order[] = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
+          const map = new Map<string, Order>();
+          localOrders.forEach(o => map.set(o.id || o.orderNumber, o));
+          list.forEach(o => map.set(o.id || o.orderNumber, o));
+          setLiveOrders(Array.from(map.values()));
+        } catch {
+          setLiveOrders(list);
+        }
       }, (err) => {
         console.warn('Orders onSnapshot error in OrdersManager:', err);
       });
-      return () => unsubscribe();
+
+      // Window event listener for immediately placed orders
+      const handleOrderPlaced = (e: any) => {
+        const newOrder = e.detail?.order;
+        if (newOrder) {
+          setLiveOrders(prev => {
+            if (prev.some(o => o.id === newOrder.id || o.orderNumber === newOrder.orderNumber)) {
+              return prev;
+            }
+            return [newOrder, ...prev];
+          });
+        }
+      };
+      window.addEventListener('jahez_order_placed', handleOrderPlaced);
+
+      return () => {
+        unsubscribe();
+        window.removeEventListener('jahez_order_placed', handleOrderPlaced);
+      };
     } catch (e) {
       console.warn('Orders listener setup error in OrdersManager:', e);
     }
@@ -357,6 +398,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     order.orderScope === 'international' ||
     order.serviceType === 'global_store' ||
     order.isGlobalStore ||
+    order.categoryId === 'global_stores' ||
+    order.categoryId === 'cat-global' ||
+    order.categoryName === 'المتاجر العالمية' ||
     order.storeCategory === 'المتاجر العالمية' ||
     (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
   );

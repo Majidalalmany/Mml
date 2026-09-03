@@ -20,7 +20,7 @@ export interface Category {
   description?: string;
   productCount?: number;
   storeCount?: number;
-  serviceType?: 'delivery' | 'field_service' | 'restaurant' | 'clothing' | 'supermarket' | 'default';
+  serviceType?: 'delivery' | 'field_service' | 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default';
   serviceTypeCategory?: 'delivery' | 'field_service'; // نوع الخدمة: توصيل / خدمة ميدانية
   createdAt?: any;
   updatedAt?: any;
@@ -330,6 +330,8 @@ export interface Order {
   orderNumber?: string;
   orderType?: string;
   orderScope?: string;
+  categoryId?: string;
+  categoryName?: string;
   storeCategory?: string;
   isGlobalStore?: boolean;
   clientId?: string;

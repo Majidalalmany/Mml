@@ -734,17 +734,43 @@ export const submitGlobalStoreOrder = async (payload: {
   const orderNumber = `GLB-${Math.floor(100000 + Math.random() * 900000)}`;
   const totalAmount = payload.items.reduce((sum, item) => sum + item.totalPrice, 0);
 
+  // Identify primary store from items
+  const firstItem = payload.items[0];
+  let primaryStoreId = 'global-store-amazon';
+  let primaryStoreName = 'أمازون العالمية (Amazon)';
+  if (firstItem?.storeId === 'shein' || firstItem?.storeName?.includes('شي إن') || firstItem?.storeName?.includes('SHEIN')) {
+    primaryStoreId = 'global-store-shein';
+    primaryStoreName = 'شي إن (SHEIN)';
+  } else if (firstItem?.storeId === 'aliexpress' || firstItem?.storeName?.includes('علي إكسبريس') || firstItem?.storeName?.includes('AliExpress')) {
+    primaryStoreId = 'global-store-aliexpress';
+    primaryStoreName = 'علي إكسبريس (AliExpress)';
+  } else if (firstItem?.storeId) {
+    primaryStoreId = firstItem.storeId.startsWith('global-store-') ? firstItem.storeId : `global-store-${firstItem.storeId}`;
+    primaryStoreName = firstItem.storeName || 'المتاجر العالمية';
+  }
+
+  const itemsCount = payload.items.reduce((sum, i) => sum + (i.quantity || 1), 0);
+  const fullAddress = `${payload.deliveryCity} - ${payload.deliveryAddress}`.trim();
+
   const orderDocData = {
     orderNumber,
     orderScope: 'international',
     serviceType: 'global_store',
+    categoryId: 'global_stores',
+    categoryName: 'المتاجر العالمية',
+    storeCategory: 'المتاجر العالمية',
+    isGlobalStore: true,
+    storeId: primaryStoreId,
+    storeName: primaryStoreName,
     customerName: payload.customerName.trim(),
     customerPhone: payload.customerPhone.trim(),
-    deliveryAddress: `${payload.deliveryCity} - ${payload.deliveryAddress}`.trim(),
+    address: fullAddress,
+    deliveryAddress: fullAddress,
     pickupAddress: `مستودعات الشحن الدولي (${payload.items.map(i => i.storeName).filter((v, i, a) => a.indexOf(v) === i).join(', ')})`,
-    orderType: `طلب متجر عالمي (${payload.items.length} أصناف)`,
+    orderType: `طلب متجر عالمي (${itemsCount} أصناف)`,
     status: 'pending_review',
     needsAdminReview: true,
+    itemsCount,
     items: payload.items.map(item => ({
       name: item.productTitle,
       productName: item.productTitle,
@@ -771,30 +797,36 @@ export const submitGlobalStoreOrder = async (payload: {
     updatedAt: new Date().toISOString()
   };
 
+  let createdId = `local-${Date.now()}`;
   try {
     const docRef = await addDoc(collection(db, 'orders'), orderDocData);
-    clearGlobalCart();
-    return {
-      success: true,
-      orderNumber,
-      orderId: docRef.id
-    };
+    createdId = docRef.id;
   } catch (err) {
     console.warn('Firestore direct write fallback (saving to localStorage / API):', err);
-    // Backup locally
-    try {
-      const localOrders = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
-      localOrders.unshift({ ...orderDocData, id: `local-${Date.now()}` });
-      localStorage.setItem('jahez_saved_orders', JSON.stringify(localOrders));
-    } catch (e) {
-      console.warn('Error saving order backup:', e);
-    }
-    clearGlobalCart();
-    return {
-      success: true,
-      orderNumber
-    };
   }
+
+  // Backup locally
+  try {
+    const localOrders = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
+    localOrders.unshift({ ...orderDocData, id: createdId });
+    localStorage.setItem('jahez_saved_orders', JSON.stringify(localOrders));
+  } catch (e) {
+    console.warn('Error saving order backup:', e);
+  }
+
+  // Dispatch custom window event so OrdersManager and App instantly receive this new order
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jahez_order_placed', {
+      detail: { order: { ...orderDocData, id: createdId } }
+    }));
+  }
+
+  clearGlobalCart();
+  return {
+    success: true,
+    orderNumber,
+    orderId: createdId
+  };
 };
 
 export const DEFAULT_GLOBAL_STORE_ENTITIES: Store[] = [
@@ -804,7 +836,7 @@ export const DEFAULT_GLOBAL_STORE_ENTITIES: Store[] = [
     description: 'أكبر متجر للتسوق في العالم: إلكترونيات أصلية، حواسيب، هواتف، أجهزة منزلية ومستلزمات متكاملة.',
     address: 'تسوق وشحن دولي (أمريكا / الإمارات / السعودية)',
     phone: '967770000001',
-    categoryId: 'cat-global',
+    categoryId: 'global_stores',
     categoryName: 'المتاجر العالمية',
     activityType: 'المتاجر العالمية',
     isGlobalStore: true,
@@ -830,7 +862,7 @@ export const DEFAULT_GLOBAL_STORE_ENTITIES: Store[] = [
     description: 'أحدث صيحات الموضة العالمية، الأزياء العصرية، الفساتين والإكسسوارات بأسعار مميزة وجودة عالية.',
     address: 'شحن وتوريد دولي سريع ومباشر',
     phone: '967770000002',
-    categoryId: 'cat-global',
+    categoryId: 'global_stores',
     categoryName: 'المتاجر العالمية',
     activityType: 'المتاجر العالمية',
     isGlobalStore: true,
@@ -856,7 +888,7 @@ export const DEFAULT_GLOBAL_STORE_ENTITIES: Store[] = [
     description: 'ملايين المنتجات المباشرة من المصانع العالمية بأسعار الجملة، مستلزمات ذكية، إكسسوارات وسلع حصرية.',
     address: 'تسوق واستيراد دولي مباشر من المصانع',
     phone: '967770000003',
-    categoryId: 'cat-global',
+    categoryId: 'global_stores',
     categoryName: 'المتاجر العالمية',
     activityType: 'المتاجر العالمية',
     isGlobalStore: true,

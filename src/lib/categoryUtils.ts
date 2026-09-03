@@ -36,7 +36,7 @@ export interface ServiceCategoryDef {
   keywords: string[];
   color: string;
   description: string;
-  serviceType: 'restaurant' | 'clothing' | 'supermarket' | 'default';
+  serviceType: 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default';
 }
 
 /**
@@ -197,13 +197,13 @@ export const CANONICAL_CATEGORIES: ServiceCategoryDef[] = [
     serviceType: 'default'
   },
   {
-    id: 'cat-global',
+    id: 'global_stores',
     label: 'المتاجر العالمية',
     icon: 'Globe',
-    keywords: ['عالمي', 'عالمية', 'متاجر عالمية', 'أمازون', 'شي إن', 'علي إكسبريس', 'نون', 'amazon', 'shein', 'aliexpress', 'noon', 'global', 'شحن دولي', 'تسوق دولي', 'شراء دولي'],
+    keywords: ['global_stores', 'cat-global', 'عالمي', 'عالمية', 'متاجر عالمية', 'أمازون', 'شي إن', 'علي إكسبريس', 'نون', 'amazon', 'shein', 'aliexpress', 'noon', 'global', 'شحن دولي', 'تسوق دولي', 'شراء دولي'],
     color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     description: 'إدارة واستعراض المتاجر العالمية المعتمدة وطلبات الشحن والتسوق الدولي المباشر (Amazon, SHEIN, AliExpress)',
-    serviceType: 'default'
+    serviceType: 'global'
   }
 ];
 
@@ -230,7 +230,7 @@ export function getAllServiceCategories(
     label: string,
     icon: string,
     description?: string,
-    serviceType?: 'restaurant' | 'clothing' | 'supermarket' | 'default',
+    serviceType?: 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default',
     color?: string
   ) => {
     const cleanLabel = sanitizeText(label);
@@ -265,7 +265,7 @@ export function getAllServiceCategories(
   if (categories && categories.length > 0) {
     for (const cat of categories) {
       const rawLabel = cat.name || cat.label || cat.serviceName || '';
-      const resolvedType = (cat.serviceType === 'restaurant' || cat.serviceType === 'clothing' || cat.serviceType === 'supermarket')
+      const resolvedType = (cat.serviceType === 'restaurant' || cat.serviceType === 'clothing' || cat.serviceType === 'supermarket' || cat.serviceType === 'global')
         ? cat.serviceType
         : 'default';
       appendCategory(
@@ -339,11 +339,12 @@ export function getAllServiceCategories(
   return result;
 }
 
-function getCategoryColor(type: 'restaurant' | 'clothing' | 'supermarket' | 'default'): string {
+function getCategoryColor(type: 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default'): string {
   switch (type) {
     case 'restaurant': return 'bg-orange-50 text-orange-700 border-orange-200';
     case 'clothing': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     case 'supermarket': return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'global': return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     default: return 'bg-sky-50 text-sky-700 border-sky-200';
   }
 }
@@ -352,9 +353,21 @@ function getCategoryColor(type: 'restaurant' | 'clothing' | 'supermarket' | 'def
  * Infer serviceType strictly.
  * New custom categories (e.g. 'الحقائب والأحذية', 'عطور', 'إلكترونيات') strictly default to 'default'.
  */
-function inferCategoryServiceType(categoryName: string): 'restaurant' | 'clothing' | 'supermarket' | 'default' {
+function inferCategoryServiceType(categoryName: string): 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default' {
   const norm = normalizeArabicText(categoryName).toLowerCase();
   
+  if (
+    norm.includes('عالمي') ||
+    norm.includes('عالمية') ||
+    norm.includes('global') ||
+    norm.includes('أمازون') ||
+    norm.includes('amazon') ||
+    norm.includes('shein') ||
+    norm.includes('شي إن')
+  ) {
+    return 'global';
+  }
+
   if (
     norm.includes('مطعم') || 
     norm.includes('مطاعم') || 
@@ -453,7 +466,11 @@ export function isStoreInServiceCategory(
   const isStoreGlobal = Boolean(
     store.isGlobalStore ||
     store.storeType === 'global' ||
-    (store.categoryId && (store.categoryId.toLowerCase() === 'cat-global' || store.categoryId.toLowerCase() === 'global')) ||
+    (store.categoryId && (
+      store.categoryId.toLowerCase() === 'global_stores' ||
+      store.categoryId.toLowerCase() === 'cat-global' || 
+      store.categoryId.toLowerCase() === 'global'
+    )) ||
     store.serviceType === 'global' ||
     (store.categoryName && (store.categoryName.includes('عالمي') || store.categoryName.toLowerCase().includes('global'))) ||
     (store.activityType && (store.activityType.includes('عالمي') || store.activityType.toLowerCase().includes('global')))

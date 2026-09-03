@@ -23,6 +23,7 @@ import {
   Sparkles,
   Layers,
   Folder,
+  Globe,
   LucideIcon
 } from 'lucide-react';
 import { Category } from '../types';
@@ -64,7 +65,8 @@ export const CATEGORY_LUCIDE_MAP: Record<string, LucideIcon> = {
   Scissors,
   Sparkles,
   Layers,
-  Folder
+  Folder,
+  Globe
 };
 
 /**
@@ -77,6 +79,7 @@ export function resolveCategoryIconKey(icon?: string): string {
 
   // Keyword-based fallback if someone passes a descriptive name or old key
   const lower = clean.toLowerCase();
+  if (lower.includes('globe') || lower.includes('عالم') || lower.includes('دولي') || lower.includes('amazon') || lower.includes('shein') || lower.includes('aliexpress')) return 'Globe';
   if (lower.includes('bag') || lower.includes('حقائب') || lower.includes('شنط')) return 'Briefcase';
   if (lower.includes('shoe') || lower.includes('أحذية') || lower.includes('جزم')) return 'Footprints';
   if (lower.includes('shirt') || lower.includes('ملابس') || lower.includes('أزياء')) return 'Shirt';
@@ -191,6 +194,15 @@ export const CANONICAL_CATEGORIES: ServiceCategoryDef[] = [
     keywords: ['بهار', 'بهارات', 'عطارة', 'قهوة', 'توابل', 'مكسرات', 'عسل', 'بخور', 'حبوب'],
     color: 'bg-amber-50 text-amber-800 border-amber-200',
     description: 'إدارة محلات العطارة، القهوة اليمنية الأصيلة، التوابل والمكسرات',
+    serviceType: 'default'
+  },
+  {
+    id: 'cat-global',
+    label: 'المتاجر العالمية',
+    icon: 'Globe',
+    keywords: ['عالمي', 'عالمية', 'متاجر عالمية', 'أمازون', 'شي إن', 'علي إكسبريس', 'نون', 'amazon', 'shein', 'aliexpress', 'noon', 'global', 'شحن دولي', 'تسوق دولي', 'شراء دولي'],
+    color: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    description: 'إدارة واستعراض المتاجر العالمية المعتمدة وطلبات الشحن والتسوق الدولي المباشر (Amazon, SHEIN, AliExpress)',
     serviceType: 'default'
   }
 ];
@@ -417,11 +429,46 @@ export function findServiceCategory(
 }
 
 export function isStoreInServiceCategory(
-  store: { categoryId?: string; categoryName?: string; activityType?: string },
+  store: { 
+    categoryId?: string; 
+    categoryName?: string; 
+    activityType?: string;
+    isGlobalStore?: boolean;
+    storeType?: string;
+    serviceType?: string;
+  },
   serviceFilter?: string,
   categories: Category[] = []
 ): boolean {
   if (!serviceFilter || serviceFilter === 'all') return true;
+
+  const filterLower = (serviceFilter || '').toLowerCase();
+  const isGlobalFilter = 
+    filterLower === 'cat-global' || 
+    filterLower === 'global' || 
+    filterLower === 'global_stores' || 
+    serviceFilter === 'المتاجر العالمية' ||
+    normalizeArabicText(serviceFilter || '') === normalizeArabicText('المتاجر العالمية');
+
+  const isStoreGlobal = Boolean(
+    store.isGlobalStore ||
+    store.storeType === 'global' ||
+    (store.categoryId && (store.categoryId.toLowerCase() === 'cat-global' || store.categoryId.toLowerCase() === 'global')) ||
+    store.serviceType === 'global' ||
+    (store.categoryName && (store.categoryName.includes('عالمي') || store.categoryName.toLowerCase().includes('global'))) ||
+    (store.activityType && (store.activityType.includes('عالمي') || store.activityType.toLowerCase().includes('global')))
+  );
+
+  // If the filter specifically requested global stores
+  if (isGlobalFilter) {
+    return isStoreGlobal;
+  }
+
+  // If the store is a global store, it should only appear when the filter is 'all' or 'cat-global'
+  if (isStoreGlobal) {
+    return false;
+  }
+
   const servDef = findServiceCategory(serviceFilter, categories);
   
   const actName = sanitizeText(store.activityType || store.categoryName || '');
@@ -535,10 +582,13 @@ export const CATEGORY_DEFAULT_LOGOS: Record<string, string> = {
   'الحلويات والمخبوزات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80',
   'مخابز وحلويات': 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80',
   'اللحوم والأسماك الطازجة': 'https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=600&q=80',
-  'محلات الحقائب والأحذية': 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80'
+  'محلات الحقائب والأحذية': 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80',
+  'المتاجر العالمية': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=600&q=80',
+  'المتاجر العالمية (Amazon/Shein)': 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=600&q=80'
 };
 
 export const CATEGORY_DEFAULT_SUBTITLES: Record<string, string> = {
+  'المتاجر العالمية': 'تسوق وشحن دولي مباشر ومضمون (Amazon, SHEIN, AliExpress)',
   'المطاعم': 'أشهى الأطباق من مطاعمك المفضلة',
   'مطاعم ومقاهي': 'أشهى الأطباق من مطاعمك المفضلة',
   'المطاعم والوجبات السريعة': 'أشهى الأطباق من مطاعمك المفضلة',

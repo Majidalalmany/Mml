@@ -1,4 +1,4 @@
-import { GlobalStore, GlobalStoreCategory, GlobalProduct, GlobalStoreConfig, GlobalCartItem } from '../types';
+import { GlobalStore, GlobalStoreCategory, GlobalProduct, GlobalStoreConfig, GlobalCartItem, Store, Product } from '../types';
 import { db, collection, addDoc } from './firebase';
 
 export const DEFAULT_GLOBAL_CONFIG: GlobalStoreConfig = {
@@ -796,3 +796,142 @@ export const submitGlobalStoreOrder = async (payload: {
     };
   }
 };
+
+export const DEFAULT_GLOBAL_STORE_ENTITIES: Store[] = [
+  {
+    id: 'global-store-amazon',
+    name: 'أمازون العالمية (Amazon)',
+    description: 'أكبر متجر للتسوق في العالم: إلكترونيات أصلية، حواسيب، هواتف، أجهزة منزلية ومستلزمات متكاملة.',
+    address: 'تسوق وشحن دولي (أمريكا / الإمارات / السعودية)',
+    phone: '967770000001',
+    categoryId: 'cat-global',
+    categoryName: 'المتاجر العالمية',
+    activityType: 'المتاجر العالمية',
+    isGlobalStore: true,
+    storeType: 'global',
+    platform: 'amazon',
+    globalSlug: 'amazon',
+    logoUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=80',
+    coverUrl: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1200&auto=format&fit=crop&q=80',
+    workingHours: 'خدمة شحن وتسوق 24/7',
+    serviceType: 'delivery',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    allowReturns: true,
+    status: 'open',
+    rating: 4.9,
+    deliveryDays: '6 - 10 أيام عمل',
+    trustedBadge: 'شحن مضمون وضمان الوكيل 100%',
+    sections: ['الإلكترونيات والذكاء', 'الملابس والأزياء', 'الحواسيب والجوالات', 'المنزل والمطبخ']
+  },
+  {
+    id: 'global-store-shein',
+    name: 'شي إن (SHEIN)',
+    description: 'أحدث صيحات الموضة العالمية، الأزياء العصرية، الفساتين والإكسسوارات بأسعار مميزة وجودة عالية.',
+    address: 'شحن وتوريد دولي سريع ومباشر',
+    phone: '967770000002',
+    categoryId: 'cat-global',
+    categoryName: 'المتاجر العالمية',
+    activityType: 'المتاجر العالمية',
+    isGlobalStore: true,
+    storeType: 'global',
+    platform: 'shein',
+    globalSlug: 'shein',
+    logoUrl: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=300&auto=format&fit=crop&q=80',
+    coverUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop&q=80',
+    workingHours: 'خدمة شحن وتسوق 24/7',
+    serviceType: 'delivery',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    allowReturns: true,
+    status: 'open',
+    rating: 4.8,
+    deliveryDays: '7 - 12 يوم عمل',
+    trustedBadge: 'متجر عالمي معتمد 100%',
+    sections: ['الملابس والأزياء', 'الأحذية والحقائب', 'التجميل والعناية', 'الإكسسوارات']
+  },
+  {
+    id: 'global-store-aliexpress',
+    name: 'علي إكسبريس (AliExpress)',
+    description: 'ملايين المنتجات المباشرة من المصانع العالمية بأسعار الجملة، مستلزمات ذكية، إكسسوارات وسلع حصرية.',
+    address: 'تسوق واستيراد دولي مباشر من المصانع',
+    phone: '967770000003',
+    categoryId: 'cat-global',
+    categoryName: 'المتاجر العالمية',
+    activityType: 'المتاجر العالمية',
+    isGlobalStore: true,
+    storeType: 'global',
+    platform: 'aliexpress',
+    globalSlug: 'aliexpress',
+    logoUrl: 'https://images.unsplash.com/photo-1555529669-e69e7aa0ba9a?w=300&auto=format&fit=crop&q=80',
+    coverUrl: 'https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=1200&auto=format&fit=crop&q=80',
+    workingHours: 'خدمة شحن وتسوق 24/7',
+    serviceType: 'delivery',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    allowReturns: true,
+    status: 'open',
+    rating: 4.7,
+    deliveryDays: '10 - 15 يوم عمل',
+    trustedBadge: 'حماية المشتري وضمان الاسترجاع',
+    sections: ['الإلكترونيات والذكاء', 'إكسسوارات السيارات', 'الأدوات المنزلية', 'الأزياء والحقائب']
+  }
+];
+
+export function getUnifiedStores(stores: Store[] = []): Store[] {
+  const result = [...stores];
+  for (const globalStore of DEFAULT_GLOBAL_STORE_ENTITIES) {
+    const exists = result.some(s => 
+      s.id === globalStore.id || 
+      (s.isGlobalStore && s.platform === globalStore.platform) ||
+      (s.platform && s.platform === globalStore.platform) ||
+      (s.name && s.name.toLowerCase().includes(globalStore.platform?.toLowerCase() || ''))
+    );
+    if (!exists) {
+      result.push(globalStore);
+    }
+  }
+  return result;
+}
+
+/**
+ * Converts curated global catalog products into standard Product entities
+ * so they can be counted and displayed seamlessly in store views.
+ */
+export function getUnifiedProducts(products: Product[] = []): Product[] {
+  const result = [...products];
+  const globalStoreMap: Record<string, { id: string; name: string }> = {
+    amazon: { id: 'global-store-amazon', name: 'أمازون العالمية (Amazon)' },
+    shein: { id: 'global-store-shein', name: 'شي إن (SHEIN)' },
+    aliexpress: { id: 'global-store-aliexpress', name: 'علي إكسبريس (AliExpress)' }
+  };
+
+  for (const p of BASE_GLOBAL_PRODUCTS) {
+    const storeTarget = globalStoreMap[p.storeId] || { id: p.storeId, name: p.storeName };
+    const globalPrice = calculateDisplayedPrice(p.originalPriceUsd);
+    const existing = result.find(item => item.id === p.id);
+    if (!existing) {
+      result.push({
+        id: p.id,
+        name: p.title,
+        description: p.description,
+        price: globalPrice,
+        originalPrice: globalPrice,
+        discountPrice: undefined,
+        imageUrl: p.imageUrl,
+        categoryId: 'cat-global',
+        categoryName: 'المتاجر العالمية',
+        storeId: storeTarget.id,
+        storeName: storeTarget.name,
+        sectionName: p.category === 'clothing' ? 'الملابس والأزياء' : (p.category === 'electronics' ? 'الإلكترونيات والذكاء' : (p.category === 'shoes_bags' ? 'الأحذية والحقائب' : 'التجميل والعناية')),
+        inStock: p.inStock,
+        status: 'active',
+        rating: p.rating,
+        salesCount: p.salesCount,
+        hasDiscount: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+  }
+  return result;
+}

@@ -47,10 +47,11 @@ const PERFORMANCE_DATA = [
 ];
 
 const CATEGORY_SHARE = [
-  { name: 'المطاعم والوجبات السريعة', value: 45, color: '#2563eb' },
-  { name: 'السوبرماركت والتموينات', value: 25, color: '#10b981' },
-  { name: 'الصيدليات والمستلزمات الطبية', value: 15, color: '#8b5cf6' },
-  { name: 'الإلكترونيات والحلويات والورود', value: 15, color: '#f59e0b' },
+  { name: 'المطاعم والوجبات السريعة', value: 38, color: '#2563eb' },
+  { name: 'السوبرماركت والتموينات', value: 24, color: '#10b981' },
+  { name: 'المتاجر العالمية (Amazon / SHEIN)', value: 18, color: '#4f46e5' },
+  { name: 'الصيدليات والمستلزمات الطبية', value: 12, color: '#8b5cf6' },
+  { name: 'الإلكترونيات والحلويات والورود', value: 8, color: '#f59e0b' },
 ];
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -59,8 +60,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onNavigateToDelivery,
   onNavigateToGlobalStores,
 }) => {
+  const isOrderGlobal = (order: Order) => Boolean(
+    order.orderType === 'global_store' ||
+    order.orderType?.includes?.('global_store') ||
+    order.orderType?.includes?.('متجر عالمي') ||
+    order.orderScope === 'international' ||
+    order.serviceType === 'global_store' ||
+    order.isGlobalStore ||
+    order.storeCategory === 'المتاجر العالمية' ||
+    (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
+  );
+
+  const globalOrders = orders.filter(isOrderGlobal);
+  const globalOrdersRevenue = globalOrders.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
+  const calculatedOrdersRevenue = orders.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
+
   const totalOrdersCount = orders.length > 0 ? orders.length + 1480 : 1524;
-  const totalRevenue = 5730000; // YER
+  const totalRevenue = calculatedOrdersRevenue > 0 ? (5730000 + calculatedOrdersRevenue) : 5730000; // YER
   const activeDrivers = 32;
   const registeredUsers = 8940;
 
@@ -178,6 +194,47 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <span>99.4% نسبة رضا العملاء</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Global Stores Integrated Performance Banner */}
+      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-blue-950 text-white p-4.5 rounded-2xl border border-indigo-700/50 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
+            <Globe className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-bold text-white">إحصائيات المتاجر العالمية المدمجة (Amazon, SHEIN, AliExpress)</h4>
+              <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 px-2 py-0.5 rounded-full font-bold">
+                مدمج ضمن قطاع المتاجر والطلبات
+              </span>
+            </div>
+            <p className="text-xs text-indigo-200/80 mt-0.5">
+              تُحسب مبيعات وطلبات السلع الدولية ديناميكياً ضمن إجمالي مبيعات المنصة مع تطبيق عمولة ورسوم الشحن والتوصيل.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0 w-full md:w-auto justify-end">
+          <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-indigo-500/20 text-center flex-1 md:flex-initial">
+            <div className="text-[11px] text-indigo-300 font-medium">طلبات المتاجر الدولية</div>
+            <div className="text-base font-bold text-white font-sans">{globalOrders.length > 0 ? globalOrders.length : 38} طلب</div>
+          </div>
+          <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-indigo-500/20 text-center flex-1 md:flex-initial">
+            <div className="text-[11px] text-indigo-300 font-medium">إجمالي المبيعات الدولية</div>
+            <div className="text-base font-bold text-emerald-400 font-sans">
+              {(globalOrdersRevenue > 0 ? globalOrdersRevenue : 890000).toLocaleString()} <span className="text-xs text-slate-300">ر.ي</span>
+            </div>
+          </div>
+          {onNavigateToGlobalStores && (
+            <button
+              onClick={onNavigateToGlobalStores}
+              className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer shadow-2xs"
+            >
+              عرض سلع المتاجر ←
+            </button>
+          )}
         </div>
       </div>
 

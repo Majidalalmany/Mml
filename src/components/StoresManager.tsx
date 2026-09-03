@@ -26,11 +26,14 @@ import {
   Filter,
   Package,
   PlusCircle,
-  FolderPlus
+  FolderPlus,
+  Upload,
+  Globe
 } from 'lucide-react';
 import { Store, Category, Product, AdminUser } from '../types';
 import { getCategoryDefaultLogo, getCategoryImageUrl, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES, getAllServiceCategories, resolveCategoryIconKey } from '../lib/categoryUtils';
 import { hasModulePermission } from '../lib/permissions';
+import { getUnifiedStores, getUnifiedProducts } from '../lib/globalStoreService';
 
 interface StoresManagerProps {
   stores: Store[];
@@ -42,6 +45,7 @@ interface StoresManagerProps {
   isAddServiceTriggered?: boolean;
   onCloseAddServiceTrigger?: () => void;
   onNavigateToCategories?: () => void;
+  onNavigateToGlobalCatalog?: (platformOrSlug?: string) => void;
   onAddCategory?: () => void;
   onSaveCategory?: (categoryData: Partial<Category>) => Promise<void> | void;
   onAddStore: () => void;
@@ -60,6 +64,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   selectedCategoryFilter,
   onSelectCategoryFilter,
   onNavigateToCategories,
+  onNavigateToGlobalCatalog,
   isAddServiceTriggered,
   onCloseAddServiceTrigger,
   onAddCategory,
@@ -71,9 +76,11 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   onSelectStore,
   currentUser
 }) => {
-  const safeStores = stores || [];
-  const safeProducts = products || [];
+  const safeStores = getUnifiedStores(stores || []);
+  const safeProducts = getUnifiedProducts(products || []);
   const safeCategories = categories || [];
+  const [newServiceType, setNewServiceType] = useState('متاجر عادية');
+  const [newServiceDescription, setNewServiceDescription] = useState('');
 
   // All active categories dynamically unified and deduplicated from categories state
   const allServiceCategories = getAllServiceCategories(safeCategories, safeStores);
@@ -112,6 +119,20 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   const [newServiceName, setNewServiceName] = useState('');
   const [newServiceIcon, setNewServiceIcon] = useState('Tag');
 
+  // Handle local image file upload from device
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          setNewServiceIcon(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   // Handle adding new service activity category
   const handleAddCustomService = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,8 +146,12 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
       label: cleanName,
       serviceName: cleanName,
       icon: newServiceIcon || 'Tag',
+      imageUrl: newServiceIcon && newServiceIcon.length > 30 ? newServiceIcon : undefined,
+      categoryImageUrl: newServiceIcon && newServiceIcon.length > 30 ? newServiceIcon : undefined,
       serviceType: 'default',
+      serviceTypeCategory: 'delivery',
       status: 'active',
+      description: newServiceDescription.trim() || undefined,
       order: (safeCategories.length || 0) + 1,
       createdAt: new Date().toISOString()
     };
@@ -157,6 +182,8 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
     }
 
     setNewServiceName('');
+    setNewServiceIcon('Tag');
+    setNewServiceDescription('');
     setIsAddServiceModalOpen(false);
   };
 
@@ -233,13 +260,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
           {canCreate && (
             <>
               <button
-                onClick={() => {
-                  if (onAddCategory) {
-                    onAddCategory();
-                  } else {
-                    setIsAddServiceModalOpen(true);
-                  }
-                }}
+                onClick={() => setIsAddServiceModalOpen(true)}
                 className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
               >
                 <FolderPlus className="w-4 h-4 text-amber-400" />
@@ -349,7 +370,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
         </div>
       ) : filteredStores.length === 0 ? (
         <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 md:p-12 text-center max-w-xl mx-auto shadow-xs my-4 space-y-6">
-          {/* Top Decorative Icon */}
           <div className="relative inline-block">
             <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center text-4xl shadow-inner mx-auto border border-blue-100">
               {activeServiceDef?.icon || '🏪'}
@@ -359,7 +379,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
             </span>
           </div>
 
-          {/* Main Title & Description */}
           <div className="space-y-2 max-w-md mx-auto">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold mb-1">
               <span>قسم:</span>
@@ -377,7 +396,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
             </p>
           </div>
 
-          {/* Category Keywords/Tip Tag Cloud if available */}
           {activeServiceDef && activeServiceDef.keywords && activeServiceDef.keywords.length > 0 && !searchTerm && (
             <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80 text-right max-w-md mx-auto">
               <p className="text-[11px] font-bold text-slate-600 mb-2 flex items-center gap-1">
@@ -394,7 +412,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
             </div>
           )}
 
-          {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             {(searchTerm || selectedStatus !== 'all') ? (
               <button
@@ -441,7 +458,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                 key={store.id}
                 className="bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden flex flex-col hover:border-blue-400 transition-all group"
               >
-                {/* Banner Header */}
                 <div className="relative h-36 bg-slate-900 overflow-hidden">
                   <img 
                     src={store.coverUrl || defaultCatLogo} 
@@ -450,9 +466,9 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                   />
                   
                   <div className="absolute top-3 right-3">
-                    <span className="bg-slate-900/90 backdrop-blur-xs text-white text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1 shadow-xs border border-white/20">
-                      <Tag className="w-3 h-3 text-amber-400" />
-                      {store.activityType || store.categoryName || 'خدمة متجر'}
+                    <span className={`${store.isGlobalStore ? 'bg-indigo-950/90 border-indigo-400/30' : 'bg-slate-900/90 border-white/20'} backdrop-blur-xs text-white text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1 shadow-xs border`}>
+                      {store.isGlobalStore ? <Globe className="w-3 h-3 text-indigo-400" /> : <Tag className="w-3 h-3 text-amber-400" />}
+                      {store.activityType || store.categoryName || (store.isGlobalStore ? 'متجر عالمي' : 'خدمة متجر')}
                     </span>
                   </div>
 
@@ -469,16 +485,22 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                   </div>
                 </div>
 
-                {/* Body Content */}
                 <div className="p-5 pt-6 flex-1 flex flex-col justify-between space-y-4">
                   <div 
                     onClick={() => onSelectStore?.(store)}
                     className="cursor-pointer space-y-1.5"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-base font-bold text-slate-900 leading-snug group-hover:text-blue-600 transition-colors">
-                        {store.name}
-                      </h3>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-base font-bold text-slate-900 leading-snug group-hover:text-blue-600 transition-colors">
+                          {store.name}
+                        </h3>
+                        {store.isGlobalStore && (
+                          <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded-md border border-indigo-200">
+                            تسوق دولي
+                          </span>
+                        )}
+                      </div>
                       <span className="text-blue-600 font-bold text-xs shrink-0 flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-transform">
                         <span>دخول للمتجر</span>
                         <span>←</span>
@@ -489,6 +511,19 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                       {store.description || 'متجر معتمد ومسجل في منصة جاهز للتوصيل السريع'}
                     </p>
                   </div>
+
+                  {store.isGlobalStore && (
+                    <div className="bg-gradient-to-r from-indigo-50/90 to-blue-50/70 border border-indigo-200/80 p-2.5 rounded-xl text-xs flex items-center justify-between text-indigo-950">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span className="font-bold shrink-0">الشحن والتوريد:</span>
+                        <span className="text-[11px] text-indigo-700 font-medium truncate">{store.deliveryDays || '6 - 12 يوم عمل'}</span>
+                      </div>
+                      <span className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full shrink-0 shadow-2xs">
+                        {store.trustedBadge || 'ضمان أصلي 100%'}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="space-y-2 border-t border-gray-100 pt-3 text-xs text-slate-600">
                     <div className="flex items-center justify-between">
@@ -521,19 +556,43 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                     )}
                   </div>
 
-                  {/* Action Buttons: Enter Store, Edit, Toggle Status/Hide, Delete */}
                   <div className="pt-2 flex flex-col gap-2">
-                    <button
-                      onClick={() => onSelectStore?.(store)}
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Layers className="w-4 h-4" />
-                      <span>صفحة المتجر (إدارة الأقسام والمنتجات)</span>
-                      <span>←</span>
-                    </button>
+                    {store.isGlobalStore ? (
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => {
+                            if (onNavigateToGlobalCatalog) {
+                              onNavigateToGlobalCatalog(store.platform || store.globalSlug || 'amazon');
+                            } else {
+                              onSelectStore?.(store);
+                            }
+                          }}
+                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Globe className="w-4 h-4" />
+                          <span>تصفح كتالوج السلع العالمية ({store.name.split(' ')[0]})</span>
+                          <span>←</span>
+                        </button>
+                        <button
+                          onClick={() => onSelectStore?.(store)}
+                          className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-slate-500" />
+                          <span>إدارة بيانات المتجر والأقسام</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => onSelectStore?.(store)}
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Layers className="w-4 h-4" />
+                        <span>صفحة المتجر (إدارة الأقسام والمنتجات)</span>
+                        <span>←</span>
+                      </button>
+                    )}
 
                     <div className="flex items-center gap-2">
-                      {/* Status / Visibility Toggle */}
                       <select
                         disabled={!canEdit}
                         value={store.status}
@@ -548,7 +607,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                         <option value="maintenance">🟡 صيانة مؤقتة</option>
                       </select>
 
-                      {/* Edit Store Button */}
                       {canEdit && (
                         <button
                           onClick={() => onEditStore(store)}
@@ -560,7 +618,6 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                         </button>
                       )}
 
-                      {/* Delete Store Button & Confirmation */}
                       {canDelete && (
                         deleteConfirmStoreId === store.id ? (
                           <div className="flex items-center gap-1.5 bg-rose-50 p-1.5 rounded-xl border border-rose-300 animate-in fade-in">
@@ -601,27 +658,28 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
         </div>
       )}
 
-      {/* 5. Modal: Add New Custom Service Category (إضافة خدمة جديدة مثل البهارات والمكسرات) */}
+      {/* 5. Modal: Add New Custom Service Category */}
       {isAddServiceModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden">
-            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
               <h3 className="font-bold text-sm flex items-center gap-2">
                 <FolderPlus className="w-4 h-4 text-amber-400" />
                 <span>إضافة فئة خدمة أو نشاط جديد للمتاجر</span>
               </h3>
               <button 
+                type="button"
                 onClick={() => setIsAddServiceModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleAddCustomService} className="p-5 space-y-4">
+            <form onSubmit={handleAddCustomService} className="p-5 space-y-4 overflow-y-auto">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  اسم الخدمة أو النشاط التجارية *
+                  اسم الخدمة أو النشاط التجاري *
                 </label>
                 <input 
                   type="text"
@@ -629,61 +687,87 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                   value={newServiceName}
                   onChange={(e) => setNewServiceName(e.target.value)}
                   placeholder="مثال: البهارات والمكسرات، مستلزمات السيارات..."
-                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  نوع العرض *
+                </label>
+                <select
+                  value={newServiceType}
+                  onChange={(e) => setNewServiceType(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                >
+                  <option value="متاجر عادية">متاجر عادية</option>
+                  <option value="متاجر عامة">متاجر عامة</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  الوصف التوضيحي
+                </label>
+                <textarea
+                  rows={3}
+                  value={newServiceDescription}
+                  onChange={(e) => setNewServiceDescription(e.target.value)}
+                  placeholder="أدخل وصفاً توضيحياً لهذه الفئة..."
+                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  رابط صورة الفئة التعبيرية (Category Image URL):
+                  صورة الفئة التعبيرية:
                 </label>
-                <input
-                  type="url"
-                  value={newServiceIcon.startsWith('http') ? newServiceIcon : ''}
-                  onChange={(e) => setNewServiceIcon(e.target.value)}
-                  placeholder="https://images.unsplash.com/... (أو اختر من النماذج الجاهزة أدناه)"
-                  className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-blue-500 mb-2"
-                />
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {[
-                    { label: 'حقائب وأحذية', img: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'ملابس وأزياء', img: 'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'مطاعم ومأكولات', img: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'سوبرماركت', img: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'إلكترونيات', img: 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'عطور وتجميل', img: 'https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'بهارات وتوابل', img: 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=400&q=80' },
-                    { label: 'عصائر ومرطبات', img: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80' }
-                  ].map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setNewServiceIcon(item.img)}
-                      className={`flex items-center gap-1.5 p-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-right ${
-                        newServiceIcon === item.img 
-                          ? 'bg-blue-50 border-blue-600 text-blue-700 ring-2 ring-blue-500' 
-                          : 'bg-gray-50 text-slate-700 border-gray-200 hover:bg-gray-100'
-                      }`}
-                    >
-                      <img src={item.img} alt={item.label} className="w-6 h-6 rounded-md object-cover shrink-0" referrerPolicy="no-referrer" />
-                      <span className="truncate text-[11px]">{item.label}</span>
-                    </button>
-                  ))}
+
+                {/* File Upload Box */}
+                <div className="mb-3">
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-slate-50 hover:bg-slate-100 transition-colors">
+                    {newServiceIcon && newServiceIcon.length > 30 ? (
+                      <div className="flex items-center gap-3 p-2">
+                        <img 
+                          src={newServiceIcon} 
+                          alt="المعاينة" 
+                          className="w-16 h-16 rounded-lg object-cover border border-gray-200"
+                        />
+                        <div className="text-right">
+                          <span className="block text-xs font-bold text-blue-600">تم اختيار الصورة</span>
+                          <span className="text-[10px] text-gray-500">اضغط لتغيير الصورة من جهازك</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center pt-2 pb-3 text-center">
+                        <Upload className="w-6 h-6 text-slate-400 mb-1" />
+                        <p className="text-xs text-slate-600 font-semibold">اضغط هنا لرفع صورة من جهازك</p>
+                        <p className="text-[10px] text-slate-400">PNG, JPG أو WEBP</p>
+                      </div>
+                    )}
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleImageUpload} 
+                      className="hidden" 
+                    />
+                  </label>
                 </div>
+
               </div>
 
               <div className="pt-3 flex items-center justify-end gap-2 border-t border-gray-100">
                 <button
                   type="button"
                   onClick={() => setIsAddServiceModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl"
+                  className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors"
                 >
                   إلغاء
                 </button>
 
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
                 >
                   حفظ الفئة الجديدة
                 </button>

@@ -1382,6 +1382,7 @@ export default function App() {
                           selectedCategoryFilter={selectedCategoryFilter}
                           onSelectCategoryFilter={(filter) => setSelectedCategoryFilter(filter)}
                           onNavigateToCategories={() => setActiveTab('categories')}
+                          onNavigateToGlobalCatalog={() => setActiveTab('global_stores')}
                           isAddServiceTriggered={isAddServiceTriggered}
                           onCloseAddServiceTrigger={() => setIsAddServiceTriggered(false)}
                           onAddCategory={() => {

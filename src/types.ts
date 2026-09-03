@@ -52,11 +52,18 @@ export interface Store {
   coverUrl?: string;
   workingHours: string;
   weeklySchedule?: DaySchedule[];
-  serviceType: 'delivery' | 'pickup' | 'both';
+  serviceType: 'delivery' | 'pickup' | 'both' | 'global';
   deliveryFeeType: 'fixed' | 'distance';
   fixedDeliveryFee?: number;
   allowReturns?: boolean; // هل المتجر يسمح بإرجاع الطلبات (مرتجع)
   status: 'open' | 'closed' | 'maintenance';
+  isGlobalStore?: boolean; // هل المتجر متجر عالمي (Amazon, SHEIN, AliExpress)
+  storeType?: 'local' | 'global'; // تصنيف المتجر (محلي أو دولي)
+  platform?: 'amazon' | 'shein' | 'aliexpress' | string; // منصة المتجر العالمي
+  globalSlug?: string;
+  rating?: number;
+  deliveryDays?: string; // مدة الشحن والتوصيل الدولي المقدرة
+  trustedBadge?: string; // شارة التوثيق والضمان
   sections?: string[];
   createdAt?: any;
 }
@@ -178,6 +185,8 @@ export interface Product {
   storageOptions?: string[];
   warranty?: string;
   generalFeatures?: string[];
+  rating?: number;
+  salesCount?: number;
   createdAt?: any;
 }
 

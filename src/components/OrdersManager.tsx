@@ -56,6 +56,7 @@ import {
 import { calculateRoadDistance, calculateDeliveryCost, estimateRoadDistanceByAddress, computeLiveRoadDistance } from '../lib/routingService';
 import { TestOrderModal } from './TestOrderModal';
 import { DistanceVerificationModal } from './DistanceVerificationModal';
+import { getUnifiedStores } from '../lib/globalStoreService';
 
 export { ORDER_STATUS_CONFIG };
 
@@ -125,6 +126,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('all');
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
+  const [storeTypeFilter, setStoreTypeFilter] = useState<'all' | 'local' | 'global'>('all');
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
@@ -346,7 +348,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   }, [orders]);
 
   const safeOrders = liveOrders.length > 0 ? liveOrders : (orders || []);
-  const safeStores = stores || [];
+  const safeStores = useMemo(() => getUnifiedStores(stores || []), [stores]);
+
+  const isOrderGlobal = (order: Order) => Boolean(
+    order.orderType === 'global_store' ||
+    order.orderType?.includes('global_store') ||
+    order.orderType?.includes('متجر عالمي') ||
+    order.orderScope === 'international' ||
+    order.serviceType === 'global_store' ||
+    order.isGlobalStore ||
+    order.storeCategory === 'المتاجر العالمية' ||
+    (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
+  );
+
+  const globalOrdersCount = useMemo(() => safeOrders.filter(isOrderGlobal).length, [safeOrders]);
+  const localOrdersCount = safeOrders.length - globalOrdersCount;
 
   // Firestore Realtime Drivers Listener
   useEffect(() => {
@@ -384,6 +400,13 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   // Filtered orders for Admin View
   const filteredOrders = useMemo(() => {
     return safeOrders.filter((order) => {
+      // Store Type Filter: All vs Local Stores vs Global Stores
+      if (storeTypeFilter !== 'all') {
+        const isGlobal = isOrderGlobal(order);
+        if (storeTypeFilter === 'global' && !isGlobal) return false;
+        if (storeTypeFilter === 'local' && isGlobal) return false;
+      }
+
       // Status filter
       if (selectedStatusTab !== 'all') {
         if (selectedStatusTab === 'pending_review') {
@@ -414,7 +437,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             order.status === 'APPROVED';
           if (!isPrep) return false;
         } else if (selectedStatusTab === 'global_stores') {
-          const isGlobal = order.orderType === 'global_store' || order.storeCategory === 'المتاجر العالمية';
+          const isGlobal = isOrderGlobal(order);
           if (!isGlobal) return false;
         } else if (order.status !== selectedStatusTab) {
           return false;
@@ -449,7 +472,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       const timeB = new Date(b.createdAt || 0).getTime();
       return timeB - timeA;
     });
-  }, [safeOrders, safeStores, selectedStatusTab, selectedStoreId, searchTerm]);
+  }, [safeOrders, safeStores, storeTypeFilter, selectedStatusTab, selectedStoreId, searchTerm]);
 
   // Orders assigned to selected driver in Driver View
   const selectedDriver = drivers.find(d => d.id === selectedDriverId) || drivers[0];
@@ -974,6 +997,60 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                     <option key={st.id} value={st.id}>{st.name}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Store Type Scope Switcher: All vs Local vs Global */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100">
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setStoreTypeFilter('all')}
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    storeTypeFilter === 'all'
+                      ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>الكل</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-700 font-mono">
+                    {safeOrders.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStoreTypeFilter('local')}
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    storeTypeFilter === 'local'
+                      ? 'bg-white text-blue-700 shadow-2xs font-extrabold border border-blue-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <StoreIcon className="w-3.5 h-3.5 text-blue-600" />
+                  <span>طلبات المتاجر المحلية</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-mono">
+                    {localOrdersCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStoreTypeFilter('global')}
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    storeTypeFilter === 'global'
+                      ? 'bg-indigo-600 text-white shadow-2xs font-extrabold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Globe className="w-3.5 h-3.5 text-indigo-300" />
+                  <span>طلبات المتاجر العالمية</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/40 text-white font-mono">
+                    {globalOrdersCount}
+                  </span>
+                </button>
+              </div>
+
+              <div className="text-[11px] text-slate-500 font-medium flex items-center gap-2">
+                <span>النتائج المعروضة: <strong className="text-slate-800 font-bold">{filteredOrders.length}</strong> طلب</span>
               </div>
             </div>
           </div>

@@ -163,7 +163,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             visibleItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isGlobalTabActive = (activeTab === 'global_stores') || (activeTab === 'restaurants' && (selectedCategoryFilter === 'cat-global' || selectedCategoryFilter === 'global' || selectedCategoryFilter === 'المتاجر العالمية'));
+              const isActive = item.id === 'global_stores' ? isGlobalTabActive : (activeTab === item.id);
+
+              // Special routing for Global Stores item to navigate to StoresManager with cat-global filter
+              if (item.id === 'global_stores') {
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      if (onSelectCategory) {
+                        onSelectCategory('cat-global');
+                      }
+                      setActiveTab('restaurants');
+                      setIsServicesExpanded(true);
+                      if (window.innerWidth < 1024) setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                      isActive 
+                        ? 'bg-blue-50 text-blue-700 font-bold border border-blue-200 shadow-2xs' 
+                        : 'text-slate-600 hover:bg-gray-50 hover:text-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-indigo-500'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        دولي
+                      </span>
+                      {item.highlight && !isActive && (
+                        <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                      )}
+                    </div>
+                  </button>
+                );
+              }
 
               if (item.id === 'restaurants') {
                 return (

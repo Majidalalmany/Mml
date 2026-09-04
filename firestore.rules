@@ -67,20 +67,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // 5. Orders & Services Collections - Public reads, RBAC writes
+    // 5. Orders & Services Collections - Public reads, Client creation, Admin manage
     match /orders/{orderId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
 
     match /fazaa_orders/{orderId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
 
     match /manfaa_orders/{orderId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
 
     // 6. Operational Collections (Audit Logs, Tickets & Invoices)

@@ -285,6 +285,27 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   useEffect(() => {
     try {
+      // 1. Initial & Periodical API sync (to fetch orders placed via Mobile Client REST API)
+      const fetchApiOrders = async () => {
+        try {
+          const res = await fetch('/api/orders');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.orders && Array.isArray(data.orders)) {
+              setLiveOrders(prev => {
+                const map = new Map<string, Order>();
+                prev.forEach(o => map.set(o.id || o.orderNumber, o));
+                data.orders.forEach((o: Order) => map.set(o.id || o.orderNumber, o));
+                return Array.from(map.values());
+              });
+            }
+          }
+        } catch {
+          // Offline mode / silent
+        }
+      };
+      fetchApiOrders();
+
       const ordersQuery = query(collection(db, 'orders'));
       const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
         const list: Order[] = snapshot.docs.map(docSnap => {
@@ -294,12 +315,41 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             data.orderType?.includes?.('global_store') ||
             data.orderType?.includes?.('متجر عالمي') ||
             data.orderScope === 'international' ||
+            data.orderScope === 'global' ||
             data.serviceType === 'global_store' ||
+            data.serviceType === 'global' ||
             data.isGlobalStore ||
             data.categoryId === 'global_stores' ||
             data.categoryId === 'cat-global' ||
+            data.categoryId === 'global' ||
             data.categoryName === 'المتاجر العالمية' ||
-            data.storeCategory === 'المتاجر العالمية'
+            data.categoryName?.includes?.('عالمي') ||
+            data.storeCategory === 'المتاجر العالمية' ||
+            data.storeCategory?.includes?.('عالمي') ||
+            data.storeId === 'amazon' ||
+            data.storeId === 'global-store-amazon' ||
+            data.storeId === 'shein' ||
+            data.storeId === 'global-store-shein' ||
+            data.storeId === 'aliexpress' ||
+            data.storeId === 'global-store-aliexpress' ||
+            data.storeName?.includes?.('أمازون') ||
+            data.storeName?.includes?.('Amazon') ||
+            data.storeName?.includes?.('SHEIN') ||
+            data.storeName?.includes?.('شي إن') ||
+            data.storeName?.includes?.('AliExpress') ||
+            data.storeName?.includes?.('علي إكسبريس') ||
+            data.storeName?.includes?.('المتاجر العالمية') ||
+            (data.items && data.items.some?.((it: any) => 
+              it.productUrl || 
+              it.sourceUrl || 
+              it.url ||
+              it.isGlobal || 
+              it.storeName?.includes?.('أمازون') || 
+              it.storeName?.includes?.('Amazon') || 
+              it.storeName?.includes?.('AliExpress') || 
+              it.storeName?.includes?.('شي إن') ||
+              it.storeName?.includes?.('SHEIN')
+            ))
           );
 
           let storeName = data.storeName || (data.items?.[0]?.storeName);
@@ -396,13 +446,45 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     order.orderType?.includes('global_store') ||
     order.orderType?.includes('متجر عالمي') ||
     order.orderScope === 'international' ||
+    order.orderScope === 'global' ||
     order.serviceType === 'global_store' ||
+    order.serviceType === 'global' ||
     order.isGlobalStore ||
     order.categoryId === 'global_stores' ||
     order.categoryId === 'cat-global' ||
+    order.categoryId === 'global' ||
     order.categoryName === 'المتاجر العالمية' ||
+    order.categoryName?.includes('عالمي') ||
     order.storeCategory === 'المتاجر العالمية' ||
-    (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
+    order.storeCategory?.includes('عالمي') ||
+    order.storeId === 'amazon' ||
+    order.storeId === 'global-store-amazon' ||
+    order.storeId === 'shein' ||
+    order.storeId === 'global-store-shein' ||
+    order.storeId === 'aliexpress' ||
+    order.storeId === 'global-store-aliexpress' ||
+    order.storeName?.includes('أمازون') ||
+    order.storeName?.includes('Amazon') ||
+    order.storeName?.includes('SHEIN') ||
+    order.storeName?.includes('شي إن') ||
+    order.storeName?.includes('AliExpress') ||
+    order.storeName?.includes('علي إكسبريس') ||
+    order.storeName?.includes('المتاجر العالمية') ||
+    (order.items && order.items.some((it: any) => 
+      it.productUrl || 
+      it.sourceUrl || 
+      it.url ||
+      it.isGlobal || 
+      it.storeId === 'amazon' ||
+      it.storeId === 'shein' ||
+      it.storeId === 'aliexpress' ||
+      it.storeName?.includes('أمازون') || 
+      it.storeName?.includes('Amazon') || 
+      it.storeName?.includes('AliExpress') || 
+      it.storeName?.includes('علي إكسبريس') || 
+      it.storeName?.includes('SHEIN') || 
+      it.storeName?.includes('شي إن')
+    ))
   );
 
   const globalOrdersCount = useMemo(() => safeOrders.filter(isOrderGlobal).length, [safeOrders]);
@@ -491,8 +573,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       // Store filter
       if (selectedStoreId !== 'all') {
         const storeObj = safeStores.find(s => s.id === selectedStoreId);
-        if (order.storeId && order.storeId !== selectedStoreId) return false;
-        if (!order.storeId && storeObj && order.storeName !== storeObj.name) return false;
+        const matchesStoreId = 
+          order.storeId === selectedStoreId ||
+          (selectedStoreId === 'global-store-amazon' && (order.storeId === 'amazon' || order.storeName?.includes('Amazon') || order.storeName?.includes('أمازون'))) ||
+          (selectedStoreId === 'global-store-shein' && (order.storeId === 'shein' || order.storeName?.includes('SHEIN') || order.storeName?.includes('شي إن'))) ||
+          (selectedStoreId === 'global-store-aliexpress' && (order.storeId === 'aliexpress' || order.storeName?.includes('AliExpress') || order.storeName?.includes('علي إكسبريس')));
+
+        const matchesStoreName = storeObj && order.storeName === storeObj.name;
+
+        if (!matchesStoreId && !matchesStoreName) return false;
       }
 
       // Search term

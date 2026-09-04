@@ -222,9 +222,25 @@ export default function App() {
     return () => unsubscribeUsers();
   }, []);
 
-  // 5. Orders Firestore Realtime Listener
+  // 5. Orders Firestore Realtime Listener & API sync
   useEffect(() => {
     setIsLoadingOrders(true);
+
+    // Sync from server REST API (orders placed via mobile app / external clients)
+    fetch('/api/orders')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.orders && Array.isArray(data.orders) && data.orders.length > 0) {
+          setOrders(prev => {
+            const map = new Map<string, Order>();
+            prev.forEach(o => map.set(o.id || o.orderNumber, o));
+            data.orders.forEach((o: Order) => map.set(o.id || o.orderNumber, o));
+            return Array.from(map.values());
+          });
+        }
+      })
+      .catch(() => {});
+
     const ordersQuery = query(collection(db, 'orders'));
 
     const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {

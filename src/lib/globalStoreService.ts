@@ -805,13 +805,24 @@ export const submitGlobalStoreOrder = async (payload: {
     console.warn('Firestore direct write fallback (saving to localStorage / API):', err);
   }
 
-  // Backup locally
+  // Backup locally & sync with Backend REST API
   try {
     const localOrders = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
     localOrders.unshift({ ...orderDocData, id: createdId });
     localStorage.setItem('jahez_saved_orders', JSON.stringify(localOrders));
   } catch (e) {
     console.warn('Error saving order backup:', e);
+  }
+
+  // Synchronize with server REST API
+  try {
+    fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...orderDocData, id: createdId })
+    }).catch(() => {});
+  } catch {
+    // Ignore network sync issues
   }
 
   // Dispatch custom window event so OrdersManager and App instantly receive this new order

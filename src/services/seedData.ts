@@ -112,6 +112,22 @@ export const INITIAL_CATEGORIES = [
     status: 'active',
     isActive: true,
     description: 'بهارات يمنية، عسل سدر حر، توابل وبخور'
+  },
+  {
+    id: 'global_stores',
+    name: 'المتاجر العالمية',
+    nameEn: 'Global Stores',
+    subtitle: 'تسوق وشحن دولي من أمازون، شي إن، وعلي إكسبريس',
+    category_image_url: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?auto=format&fit=crop&w=800&q=80',
+    banner_image_url: 'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1200&q=80',
+    coverUrl: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?auto=format&fit=crop&w=800&q=80',
+    serviceType: 'global',
+    serviceTypeCategory: 'delivery',
+    ctaText: 'تسوق دولياً',
+    order: 9,
+    status: 'active',
+    isActive: true,
+    description: 'إدارة واستعراض المتاجر العالمية المعتمدة وطلبات الشحن والتسوق الدولي المباشر (Amazon, SHEIN, AliExpress)'
   }
 ];
 
@@ -220,6 +236,51 @@ export const INITIAL_STORES = [
     fixedDeliveryFee: 500,
     status: 'open',
     sections: ['جوالات وملحقات', 'سماعات وشواحن', 'أجهزة منزلية']
+  },
+  {
+    name: 'أمازون العالمية (Amazon)',
+    description: 'أكبر متجر للتسوق في العالم: إلكترونيات أصلية، حواسيب، هواتف، أجهزة منزلية ومستلزمات متكاملة.',
+    address: 'تسوق وشحن دولي (أمريكا / الإمارات / السعودية)',
+    phone: '967770000001',
+    categoryName: 'المتاجر العالمية',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg',
+    coverUrl: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?auto=format&fit=crop&w=1200&q=80',
+    workingHours: 'على مدار 24 ساعة',
+    serviceType: 'global',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    status: 'open',
+    sections: ['إلكترونيات وهواتف', 'أجهزة حاسوب', 'ألعاب واكسسوارات', 'مستلزمات المنزل']
+  },
+  {
+    name: 'شي إن (SHEIN)',
+    description: 'أحدث صيحات الموضة العالمية، الأزياء العصرية، الفساتين والإكسسوارات بأسعار مميزة وجودة عالية.',
+    address: 'شحن وتوريد دولي سريع ومباشر',
+    phone: '967770000002',
+    categoryName: 'المتاجر العالمية',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Shein-logo.png/640px-Shein-logo.png',
+    coverUrl: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1200&q=80',
+    workingHours: 'على مدار 24 ساعة',
+    serviceType: 'global',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    status: 'open',
+    sections: ['ملابس نسائية', 'ملابس رجالية', 'أحذية وحقائب', 'إكسسوارات وجمال']
+  },
+  {
+    name: 'علي إكسبريس (AliExpress)',
+    description: 'ملايين المنتجات المباشرة من المصانع العالمية بأسعار الجملة، مستلزمات ذكية، إكسسوارات وسلع حصرية.',
+    address: 'تسوق واستيراد دولي مباشر من المصانع',
+    phone: '967770000003',
+    categoryName: 'المتاجر العالمية',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/Aliexpress_logo.svg/800px-Aliexpress_logo.svg.png',
+    coverUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1200&q=80',
+    workingHours: 'على مدار 24 ساعة',
+    serviceType: 'global',
+    deliveryFeeType: 'fixed',
+    fixedDeliveryFee: 1500,
+    status: 'open',
+    sections: ['قطع إلكترونية وذكية', 'أدوات ومستلزمات صيانة', 'إكسسوارات سيارات', 'مستلزمات شخصية']
   }
 ];
 

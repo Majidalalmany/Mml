@@ -321,6 +321,198 @@ async function startServer() {
     res.status(201).json({ success: true, category: newCategory });
   });
 
+  // ==================== UNIFIED GENERAL & GLOBAL ORDERS API ====================
+  let inMemoryOrders: any[] = [
+    {
+      id: "ord-glb-901",
+      orderNumber: "GLB-748921",
+      customerName: "محمد عبده الأهدل",
+      customerPhone: "777654321",
+      address: "صنعاء - شارع حدة، عمارة الإسكان",
+      deliveryAddress: "صنعاء - شارع حدة، عمارة الإسكان",
+      pickupAddress: "مستودعات الشحن الدولي (أمازون)",
+      storeId: "global-store-amazon",
+      storeName: "أمازون العالمية (Amazon)",
+      categoryId: "global_stores",
+      categoryName: "المتاجر العالمية",
+      storeCategory: "المتاجر العالمية",
+      isGlobalStore: true,
+      serviceType: "global_store",
+      orderScope: "international",
+      orderType: "طلب متجر عالمي (2 أصناف)",
+      total: 38500,
+      itemsTotal: 38500,
+      deliveryFee: 0,
+      status: "pending_review",
+      needsAdminReview: true,
+      itemsCount: 2,
+      items: [
+        {
+          name: "ساعة ذكية مقاومة للماء مع مراقب ضربات القلب",
+          productName: "ساعة ذكية مقاومة للماء مع مراقب ضربات القلب",
+          productId: "AMZ-WTCH-01",
+          price: 18500,
+          quantity: 1,
+          totalPrice: 18500,
+          imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80",
+          productUrl: "https://www.amazon.com/dp/B09B8V1LZ3",
+          sourceUrl: "https://www.amazon.com/dp/B09B8V1LZ3",
+          size: "42mm",
+          color: "أسود ملكي",
+          storeName: "أمازون العالمية (Amazon)"
+        },
+        {
+          name: "سماعة أذن بلوتوث لاسلكية عازلة للضوضاء",
+          productName: "سماعة أذن بلوتوث لاسلكية عازلة للضوضاء",
+          productId: "AMZ-EAR-02",
+          price: 20000,
+          quantity: 1,
+          totalPrice: 20000,
+          imageUrl: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80",
+          productUrl: "https://www.amazon.com/dp/B08PZHYWJS",
+          sourceUrl: "https://www.amazon.com/dp/B08PZHYWJS",
+          size: "قياسي",
+          color: "فضي",
+          storeName: "أمازون العالمية (Amazon)"
+        }
+      ],
+      paymentMethod: "cash_on_delivery",
+      paymentStatus: "pending",
+      notes: "طلب مباشر من تطبيق العميل للشحن إلى صنعاء.",
+      createdAt: new Date(Date.now() - 1200000).toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  ];
+
+  // GET /api/orders - List all orders (with optional type/category filter)
+  app.get("/api/orders", (req, res) => {
+    const { categoryId, storeId, serviceType, isGlobal } = req.query;
+    let list = [...inMemoryOrders];
+    if (categoryId) list = list.filter(o => o.categoryId === categoryId);
+    if (storeId) list = list.filter(o => o.storeId === storeId);
+    if (serviceType) list = list.filter(o => o.serviceType === serviceType);
+    if (isGlobal !== undefined) {
+      const wantGlobal = isGlobal === 'true' || isGlobal === '1';
+      list = list.filter(o => Boolean(o.isGlobalStore) === wantGlobal);
+    }
+    res.json({ orders: list, count: list.length });
+  });
+
+  // POST /api/orders & /api/global-stores/orders - Create or accept new order from Client App
+  app.post(["/api/orders", "/api/global-stores/orders"], (req, res) => {
+    try {
+      const orderPayload = req.body;
+      const orderNumber = orderPayload.orderNumber || `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+      const isGlobal = Boolean(
+        orderPayload.serviceType === 'global' ||
+        orderPayload.serviceType === 'global_store' ||
+        orderPayload.orderScope === 'international' ||
+        orderPayload.orderScope === 'global' ||
+        orderPayload.isGlobalStore ||
+        orderPayload.categoryId === 'global_stores' ||
+        orderPayload.categoryId === 'cat-global' ||
+        orderPayload.storeId === 'amazon' ||
+        orderPayload.storeId === 'global-store-amazon' ||
+        orderPayload.storeId === 'shein' ||
+        orderPayload.storeId === 'global-store-shein' ||
+        orderPayload.storeId === 'aliexpress' ||
+        orderPayload.storeId === 'global-store-aliexpress' ||
+        orderPayload.storeName?.includes('أمازون') ||
+        orderPayload.storeName?.includes('Amazon') ||
+        orderPayload.storeName?.includes('SHEIN') ||
+        orderPayload.storeName?.includes('شي إن') ||
+        orderPayload.storeName?.includes('AliExpress') ||
+        orderPayload.storeName?.includes('علي إكسبريس') ||
+        orderPayload.storeCategory === 'المتاجر العالمية' ||
+        (orderPayload.items && orderPayload.items.some((it: any) => it.productUrl || it.sourceUrl || it.isGlobal))
+      );
+
+      // Extract primary store
+      let primaryStoreId = orderPayload.storeId;
+      let primaryStoreName = orderPayload.storeName;
+      if (isGlobal && !primaryStoreId) {
+        primaryStoreId = 'global-store-amazon';
+        primaryStoreName = 'أمازون العالمية (Amazon)';
+      }
+
+      const normalizedOrder = {
+        id: orderPayload.id || `ord-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        orderNumber,
+        customerName: orderPayload.customerName || orderPayload.userName || 'عميل المتجر',
+        customerPhone: orderPayload.customerPhone || orderPayload.phone || '',
+        address: orderPayload.deliveryAddress || orderPayload.address || '',
+        deliveryAddress: orderPayload.deliveryAddress || orderPayload.address || '',
+        pickupAddress: orderPayload.pickupAddress || (isGlobal ? 'مستودعات الشحن الدولي' : 'المتجر'),
+        storeId: primaryStoreId || (isGlobal ? 'global-store-amazon' : 'general-store'),
+        storeName: primaryStoreName || (isGlobal ? 'المتاجر العالمية' : 'متجر عام'),
+        categoryId: orderPayload.categoryId || (isGlobal ? 'global_stores' : 'general'),
+        categoryName: orderPayload.categoryName || (isGlobal ? 'المتاجر العالمية' : 'عام'),
+        storeCategory: orderPayload.storeCategory || (isGlobal ? 'المتاجر العالمية' : 'عام'),
+        isGlobalStore: isGlobal,
+        serviceType: isGlobal ? 'global_store' : (orderPayload.serviceType || 'delivery'),
+        orderScope: isGlobal ? 'international' : (orderPayload.orderScope || 'local'),
+        orderType: orderPayload.orderType || (isGlobal ? 'طلب متجر عالمي' : 'طلب عادي'),
+        total: Number(orderPayload.total || orderPayload.totalPrice || orderPayload.orderTotal || 0),
+        itemsTotal: Number(orderPayload.itemsTotal || orderPayload.subtotal || orderPayload.itemsPrice || 0),
+        deliveryFee: Number(orderPayload.deliveryFee || 0),
+        status: orderPayload.status || (isGlobal ? 'pending_review' : 'new'),
+        needsAdminReview: isGlobal || Boolean(orderPayload.needsAdminReview),
+        itemsCount: orderPayload.itemsCount || (orderPayload.items ? orderPayload.items.length : 1),
+        items: Array.isArray(orderPayload.items) ? orderPayload.items.map((it: any) => ({
+          name: it.name || it.productName || it.productTitle || 'منتج',
+          productName: it.productName || it.name || it.productTitle || 'منتج',
+          productId: it.productId || it.id || '',
+          price: Number(it.price || it.displayedPrice || 0),
+          quantity: Number(it.quantity || 1),
+          totalPrice: Number(it.totalPrice || ((it.price || 0) * (it.quantity || 1))),
+          imageUrl: it.imageUrl || it.image || '',
+          productUrl: it.productUrl || it.sourceUrl || it.url || '',
+          sourceUrl: it.sourceUrl || it.productUrl || it.url || '',
+          size: it.size || it.selectedSize || '',
+          color: it.color || it.selectedColor || '',
+          storeName: it.storeName || primaryStoreName || ''
+        })) : [],
+        paymentMethod: orderPayload.paymentMethod || 'cash_on_delivery',
+        paymentStatus: orderPayload.paymentStatus || 'pending',
+        notes: orderPayload.notes || '',
+        createdAt: orderPayload.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      inMemoryOrders.unshift(normalizedOrder);
+      res.status(201).json({
+        success: true,
+        message: "تم تسجيل وحفظ الطلب بنجاح في النظام",
+        orderNumber: normalizedOrder.orderNumber,
+        orderId: normalizedOrder.id,
+        order: normalizedOrder
+      });
+    } catch (err: any) {
+      console.error("Error creating order:", err);
+      res.status(500).json({ error: "فشل إنشاء الطلب", details: err?.message });
+    }
+  });
+
+  // PATCH /api/orders/:id/status - Update Order Status
+  app.patch("/api/orders/:id/status", (req, res) => {
+    const { id } = req.params;
+    const { status, finalPrice, adminNotes, driverName, driverPhone } = req.body;
+    const idx = inMemoryOrders.findIndex(o => o.id === id || o.orderNumber === id);
+    if (idx === -1) {
+      return res.status(404).json({ error: "الطلب غير موجود" });
+    }
+    inMemoryOrders[idx] = {
+      ...inMemoryOrders[idx],
+      ...(status ? { status } : {}),
+      ...(finalPrice ? { total: Number(finalPrice), itemsTotal: Number(finalPrice) } : {}),
+      ...(adminNotes ? { adminReviewNotes: adminNotes } : {}),
+      ...(driverName !== undefined ? { driverName } : {}),
+      ...(driverPhone !== undefined ? { driverPhone } : {}),
+      updatedAt: new Date().toISOString()
+    };
+    res.json({ success: true, order: inMemoryOrders[idx] });
+  });
+
   // ==================== APP CUSTOMERS / USER PROFILE API ====================
   // GET /api/users - List app customers
   app.get("/api/users", (req, res) => {

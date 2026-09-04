@@ -771,21 +771,57 @@ export const submitGlobalStoreOrder = async (payload: {
     status: 'pending_review',
     needsAdminReview: true,
     itemsCount,
-    items: payload.items.map(item => ({
-      name: item.productTitle,
-      productName: item.productTitle,
-      productId: item.productId,
-      storeName: item.storeName,
-      storeId: item.storeId,
-      productUrl: item.sourceUrl,
-      sourceUrl: item.sourceUrl,
-      size: item.selectedSize,
-      color: item.selectedColor,
-      quantity: item.quantity,
-      price: item.displayedPrice,
-      totalPrice: item.totalPrice,
-      imageUrl: item.imageUrl
-    })),
+    clientId: payload.customerPhone.trim(),
+    customerId: payload.customerPhone.trim(),
+    معرف_العميل: payload.customerPhone.trim(),
+    معرف_المتجر: primaryStoreId,
+    معرف_الفئة: 'global_stores',
+    رسوم_التوصيل: 0,
+    الحالة: 'pending_review',
+    items: payload.items.map(item => {
+      const productSnapshot = {
+        id: item.productId,
+        name: item.productTitle,
+        productName: item.productTitle,
+        price: item.displayedPrice,
+        imageUrl: item.imageUrl,
+        productUrl: item.sourceUrl,
+        sourceUrl: item.sourceUrl,
+        storeName: item.storeName,
+        storeId: item.storeId
+      };
+      const specsSnapshot = {
+        size: item.selectedSize || '',
+        color: item.selectedColor || ''
+      };
+      const addonsSnapshot = {
+        options: [],
+        notes: ''
+      };
+
+      return {
+        name: item.productTitle,
+        productName: item.productTitle,
+        productId: item.productId,
+        storeName: item.storeName,
+        storeId: item.storeId,
+        productUrl: item.sourceUrl,
+        sourceUrl: item.sourceUrl,
+        size: item.selectedSize,
+        color: item.selectedColor,
+        quantity: item.quantity,
+        price: item.displayedPrice,
+        totalPrice: item.totalPrice,
+        imageUrl: item.imageUrl,
+        // ER Diagram Snapshots:
+        product_snapshot: productSnapshot,
+        specs_snapshot: specsSnapshot,
+        addons_snapshot: addonsSnapshot,
+        لقطة_المنتج: productSnapshot,
+        لقطة_المواصفات: specsSnapshot,
+        لقطة_الإضافات: addonsSnapshot
+      };
+    }),
     total: totalAmount,
     totalPrice: totalAmount,
     itemsTotal: totalAmount,

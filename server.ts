@@ -458,20 +458,68 @@ async function startServer() {
         status: orderPayload.status || (isGlobal ? 'pending_review' : 'new'),
         needsAdminReview: isGlobal || Boolean(orderPayload.needsAdminReview),
         itemsCount: orderPayload.itemsCount || (orderPayload.items ? orderPayload.items.length : 1),
-        items: Array.isArray(orderPayload.items) ? orderPayload.items.map((it: any) => ({
-          name: it.name || it.productName || it.productTitle || 'منتج',
-          productName: it.productName || it.name || it.productTitle || 'منتج',
-          productId: it.productId || it.id || '',
-          price: Number(it.price || it.displayedPrice || 0),
-          quantity: Number(it.quantity || 1),
-          totalPrice: Number(it.totalPrice || ((it.price || 0) * (it.quantity || 1))),
-          imageUrl: it.imageUrl || it.image || '',
-          productUrl: it.productUrl || it.sourceUrl || it.url || '',
-          sourceUrl: it.sourceUrl || it.productUrl || it.url || '',
-          size: it.size || it.selectedSize || '',
-          color: it.color || it.selectedColor || '',
-          storeName: it.storeName || primaryStoreName || ''
-        })) : [],
+        clientId: orderPayload.clientId || orderPayload.customerId || orderPayload.customerPhone || '',
+        customerId: orderPayload.customerId || orderPayload.clientId || orderPayload.customerPhone || '',
+        معرف_العميل: orderPayload.clientId || orderPayload.customerId || orderPayload.customerPhone || '',
+        معرف_المتجر: primaryStoreId || (isGlobal ? 'global-store-amazon' : 'general-store'),
+        معرف_الفئة: orderPayload.categoryId || (isGlobal ? 'global_stores' : 'general'),
+        رسوم_التوصيل: Number(orderPayload.deliveryFee || 0),
+        الحالة: orderPayload.status || (isGlobal ? 'pending_review' : 'new'),
+        items: Array.isArray(orderPayload.items) ? orderPayload.items.map((it: any) => {
+          const prodTitle = it.name || it.productName || it.productTitle || 'منتج';
+          const pPrice = Number(it.price || it.displayedPrice || 0);
+          const pQty = Number(it.quantity || 1);
+          const pUrl = it.productUrl || it.sourceUrl || it.url || '';
+          const pImg = it.imageUrl || it.image || '';
+          const pSize = it.size || it.selectedSize || '';
+          const pColor = it.color || it.selectedColor || '';
+
+          const productSnapshot = it.product_snapshot || it.لقطة_المنتج || {
+            id: it.productId || it.id || '',
+            name: prodTitle,
+            productName: prodTitle,
+            price: pPrice,
+            imageUrl: pImg,
+            productUrl: pUrl,
+            sourceUrl: pUrl,
+            storeName: it.storeName || primaryStoreName || '',
+            storeId: it.storeId || primaryStoreId || ''
+          };
+
+          const specsSnapshot = it.specs_snapshot || it.لقطة_المواصفات || {
+            size: pSize,
+            color: pColor,
+            weightKg: it.weightKg || 0.5
+          };
+
+          const addonsSnapshot = it.addons_snapshot || it.لقطة_الإضافات || {
+            options: it.options || [],
+            notes: it.notes || ''
+          };
+
+          return {
+            name: prodTitle,
+            productName: prodTitle,
+            productId: it.productId || it.id || '',
+            price: pPrice,
+            quantity: pQty,
+            totalPrice: Number(it.totalPrice || (pPrice * pQty)),
+            imageUrl: pImg,
+            productUrl: pUrl,
+            sourceUrl: pUrl,
+            size: pSize,
+            color: pColor,
+            storeName: it.storeName || primaryStoreName || '',
+            storeId: it.storeId || primaryStoreId || '',
+            // ER Diagram snapshots
+            product_snapshot: productSnapshot,
+            specs_snapshot: specsSnapshot,
+            addons_snapshot: addonsSnapshot,
+            لقطة_المنتج: productSnapshot,
+            لقطة_المواصفات: specsSnapshot,
+            لقطة_الإضافات: addonsSnapshot
+          };
+        }) : [],
         paymentMethod: orderPayload.paymentMethod || 'cash_on_delivery',
         paymentStatus: orderPayload.paymentStatus || 'pending',
         notes: orderPayload.notes || '',

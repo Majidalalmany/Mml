@@ -38,11 +38,14 @@ import {
   Scale,
   Zap,
   Globe,
-  PhoneCall
+  PhoneCall,
+  Tag,
+  ExternalLink
 } from 'lucide-react';
-import { Order, OrderStatus, Store, AdminUser, DriverUser, VehicleType } from '../types';
+import { Order, OrderStatus, Store, Category, AdminUser, DriverUser, VehicleType } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
+import { INITIAL_CATEGORIES } from '../services/seedData';
 import { db, collection, addDoc, onSnapshot, query } from '../lib/firebase';
 import { 
   getLocalVehicles, 
@@ -103,6 +106,7 @@ const DEFAULT_DRIVERS: DriverUser[] = [
 interface OrdersManagerProps {
   orders: Order[];
   stores: Store[];
+  categories?: Category[];
   currentUser: AdminUser | null;
   isLoading: boolean;
   onUpdateOrderStatus: (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => Promise<void>;
@@ -113,6 +117,7 @@ interface OrdersManagerProps {
 export const OrdersManager: React.FC<OrdersManagerProps> = ({
   orders = [],
   stores = [],
+  categories = [],
   currentUser,
   isLoading,
   onUpdateOrderStatus,
@@ -126,6 +131,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('all');
   const [selectedStoreId, setSelectedStoreId] = useState<string>('all');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [storeTypeFilter, setStoreTypeFilter] = useState<'all' | 'local' | 'global'>('all');
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
@@ -440,6 +446,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   const safeOrders = liveOrders.length > 0 ? liveOrders : (orders || []);
   const safeStores = useMemo(() => getUnifiedStores(stores || []), [stores]);
+  const safeCategories = useMemo(() => {
+    const merged = [...(categories || [])];
+    INITIAL_CATEGORIES.forEach(initCat => {
+      if (!merged.some(c => c.id === initCat.id || c.name === initCat.name)) {
+        merged.push(initCat as any);
+      }
+    });
+    return merged;
+  }, [categories]);
 
   const isOrderGlobal = (order: Order) => Boolean(
     order.orderType === 'global_store' ||
@@ -582,6 +597,32 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         const matchesStoreName = storeObj && order.storeName === storeObj.name;
 
         if (!matchesStoreId && !matchesStoreName) return false;
+      }
+
+      // Dynamic Category Filter (ER Diagram: جدول فئة_المتجر / معرف_الفئة)
+      if (selectedCategoryId !== 'all') {
+        const orderCatId = order.categoryId || (order as any).معرف_الفئة;
+        const selectedCat = safeCategories.find(c => c.id === selectedCategoryId);
+        const catName = selectedCat?.name;
+
+        const matchesCatId = orderCatId === selectedCategoryId;
+        const matchesCatName = Boolean(catName && (order.categoryName === catName || order.storeCategory === catName));
+
+        // Also check if the store itself belongs to this category
+        const storeMatch = safeStores.find(s => s.id === order.storeId || s.name === order.storeName);
+        const matchesStoreCat = Boolean(
+          storeMatch && (
+            storeMatch.categoryId === selectedCategoryId ||
+            (catName && storeMatch.categoryName === catName)
+          )
+        );
+
+        // Global stores category check
+        const matchesGlobalDirect = (selectedCategoryId === 'global_stores' || selectedCategoryId === 'global') && isOrderGlobal(order);
+
+        if (!matchesCatId && !matchesCatName && !matchesStoreCat && !matchesGlobalDirect) {
+          return false;
+        }
       }
 
       // Search term
@@ -1117,13 +1158,28 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 )}
               </div>
 
+              {/* Category Filter (ER Diagram Unified Architecture) */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <Tag className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={selectedCategoryId}
+                  onChange={(e) => setSelectedCategoryId(e.target.value)}
+                  className="w-full md:w-48 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">جميع الفئات والأنشطة ({safeCategories.length})</option>
+                  {safeCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Store Filter */}
               <div className="flex items-center gap-2 w-full md:w-auto">
                 <Filter className="w-4 h-4 text-slate-400 shrink-0" />
                 <select
                   value={selectedStoreId}
                   onChange={(e) => setSelectedStoreId(e.target.value)}
-                  className="w-full md:w-56 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full md:w-52 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="all">جميع المتاجر والمطاعم</option>
                   {safeStores.map(st => (
@@ -1393,19 +1449,57 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       <div className="space-y-1.5">
                         <span className="text-[11px] font-bold text-slate-400 block">الأصناف المطلوبة ({order.itemsCount || order.items?.length || 1}):</span>
                         {order.items && order.items.length > 0 ? (
-                          <div className="space-y-1 bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
-                            {order.items.map((it, idx) => (
-                              <div key={idx} className="flex items-center justify-between text-xs text-slate-700">
-                                <span className="font-medium">
-                                  <span className="font-bold text-blue-600 ml-1">{it.quantity}x</span>
-                                  {it.productName}
-                                  {it.options && it.options.length > 0 && (
-                                    <span className="text-[10px] text-slate-400 mr-1">({it.options.join(', ')})</span>
-                                  )}
-                                </span>
-                                <span className="font-bold font-mono text-slate-800">{(it.price * it.quantity).toLocaleString()} ر.ي</span>
-                              </div>
-                            ))}
+                          <div className="space-y-2 bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
+                            {order.items.map((it, idx) => {
+                              const prodName = it.product_snapshot?.name || it.product_snapshot?.productName || (it as any).لقطة_المنتج?.name || it.productName || it.name;
+                              const prodUrl = it.product_snapshot?.productUrl || it.product_snapshot?.sourceUrl || (it as any).لقطة_المنتج?.productUrl || it.productUrl || it.sourceUrl;
+                              const prodImg = it.product_snapshot?.imageUrl || (it as any).لقطة_المنتج?.imageUrl || it.imageUrl;
+                              const specs = it.specs_snapshot || (it as any).لقطة_المواصفات || {};
+                              const size = specs.size || it.size;
+                              const color = specs.color || it.color;
+                              const itemTotal = it.totalPrice || ((it.price || 0) * (it.quantity || 1));
+
+                              return (
+                                <div key={idx} className="flex items-start justify-between text-xs text-slate-700 gap-2 border-b border-gray-100/60 pb-1.5 last:border-b-0 last:pb-0">
+                                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                                    {prodImg && (
+                                      <img 
+                                        src={prodImg} 
+                                        alt={prodName} 
+                                        className="w-8 h-8 rounded-lg object-cover border border-gray-200 shrink-0 mt-0.5"
+                                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                                      />
+                                    )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-bold text-blue-600 shrink-0">{it.quantity || 1}x</span>
+                                        <span className="font-medium text-slate-900 leading-snug">{prodName}</span>
+                                        {prodUrl && (
+                                          <a 
+                                            href={prodUrl} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            className="text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0"
+                                            title="عرض المنتج في المتجر الأصلي"
+                                          >
+                                            <span>الرابط</span>
+                                            <ExternalLink className="w-2.5 h-2.5" />
+                                          </a>
+                                        )}
+                                      </div>
+                                      {(size || color || (it.options && it.options.length > 0)) && (
+                                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[10px] text-slate-500">
+                                          {size && <span className="bg-slate-100 px-1.5 py-0.2 rounded font-mono">المقاس: {size}</span>}
+                                          {color && <span className="bg-slate-100 px-1.5 py-0.2 rounded">اللون: {color}</span>}
+                                          {it.options && it.options.length > 0 && <span>({it.options.join(', ')})</span>}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span className="font-bold font-mono text-slate-800 shrink-0">{itemTotal.toLocaleString()} ر.ي</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-xs text-slate-600 font-medium bg-gray-50 p-2 rounded-lg">
@@ -2551,17 +2645,57 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 <span className="font-bold text-slate-800 block">قائمة أصناف الطلب:</span>
                 <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
                   {viewingOrder.items && viewingOrder.items.length > 0 ? (
-                    viewingOrder.items.map((it, idx) => (
-                      <div key={idx} className="p-2.5 flex items-center justify-between bg-white">
-                        <div>
-                          <p className="font-bold text-slate-800">{it.productName}</p>
-                          {it.options && <p className="text-[10px] text-slate-400">{it.options.join(', ')}</p>}
+                    viewingOrder.items.map((it, idx) => {
+                      const prodName = it.product_snapshot?.name || it.product_snapshot?.productName || (it as any).لقطة_المنتج?.name || it.productName || it.name;
+                      const prodUrl = it.product_snapshot?.productUrl || it.product_snapshot?.sourceUrl || (it as any).لقطة_المنتج?.productUrl || it.productUrl || it.sourceUrl;
+                      const prodImg = it.product_snapshot?.imageUrl || (it as any).لقطة_المنتج?.imageUrl || it.imageUrl;
+                      const specs = it.specs_snapshot || (it as any).لقطة_المواصفات || {};
+                      const size = specs.size || it.size;
+                      const color = specs.color || it.color;
+                      const itemTotal = it.totalPrice || ((it.price || 0) * (it.quantity || 1));
+
+                      return (
+                        <div key={idx} className="p-3 flex items-center justify-between bg-white gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            {prodImg && (
+                              <img 
+                                src={prodImg} 
+                                alt={prodName} 
+                                className="w-10 h-10 rounded-lg object-cover border border-gray-200 shrink-0"
+                                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                              />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-bold text-slate-900">{prodName}</p>
+                                {prodUrl && (
+                                  <a 
+                                    href={prodUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold"
+                                  >
+                                    <span>عرض في المتجر</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                )}
+                              </div>
+                              {(size || color || (it.options && it.options.length > 0)) && (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px] text-slate-500">
+                                  {size && <span className="bg-slate-100 px-1.5 py-0.2 rounded font-mono">المقاس: {size}</span>}
+                                  {color && <span className="bg-slate-100 px-1.5 py-0.2 rounded">اللون: {color}</span>}
+                                  {it.options && it.options.length > 0 && <span>({it.options.join(', ')})</span>}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-left font-mono shrink-0">
+                            <p className="font-bold text-slate-900">{it.quantity || 1} x {(it.price || 0).toLocaleString()} ر.ي</p>
+                            <p className="text-[11px] text-slate-500">{itemTotal.toLocaleString()} ر.ي</p>
+                          </div>
                         </div>
-                        <div className="text-left font-mono">
-                          <p className="font-bold text-slate-900">{it.quantity} x {it.price.toLocaleString()} ر.ي</p>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="p-3 text-slate-500">تفاصيل الاصناف مرتبطة بمنتجات المتجر.</div>
                   )}

@@ -1517,6 +1517,7 @@ export default function App() {
                     <OrdersManager 
                       orders={orders}
                       stores={stores}
+                      categories={categories}
                       currentUser={currentUser}
                       isLoading={isLoadingOrders}
                       onUpdateOrderStatus={handleUpdateOrderStatus}

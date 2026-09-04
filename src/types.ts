@@ -22,6 +22,14 @@ export interface Category {
   storeCount?: number;
   serviceType?: 'delivery' | 'field_service' | 'restaurant' | 'clothing' | 'supermarket' | 'global' | 'default';
   serviceTypeCategory?: 'delivery' | 'field_service'; // نوع الخدمة: توصيل / خدمة ميدانية
+  
+  // ER Diagram Unified Store Category Fields (جدول فئة_المتجر)
+  unitType?: string; // نوع_الوحدة (e.g. 'standard', 'global_catalog', 'external_shopping')
+  additionalAttributes?: Record<string, any>; // خصائص_إضافية (JSON)
+  extraProperties?: Record<string, any>; // alias for خصائص_إضافية
+  نوع_الوحدة?: string;
+  خصائص_إضافية?: Record<string, any>;
+  
   createdAt?: any;
   updatedAt?: any;
 }
@@ -309,12 +317,15 @@ export interface OrderItem {
   id?: string;
   productName: string;
   name?: string;
+  productId?: string;
   price: number;
   quantity: number;
+  totalPrice?: number;
   weightKg?: number;
   options?: string[];
   notes?: string;
   storeName?: string;
+  storeId?: string;
   productUrl?: string;
   sourceUrl?: string;
   url?: string;
@@ -322,6 +333,39 @@ export interface OrderItem {
   image?: string;
   size?: string;
   color?: string;
+
+  // ER Diagram Unified Order Items Snapshots (جدول عنصر_الطلب)
+  product_snapshot?: {
+    id?: string;
+    name?: string;
+    productName?: string;
+    price?: number;
+    imageUrl?: string;
+    productUrl?: string;
+    sourceUrl?: string;
+    storeName?: string;
+    storeId?: string;
+    brand?: string;
+    [key: string]: any;
+  };
+  specs_snapshot?: {
+    size?: string;
+    color?: string;
+    weightKg?: number;
+    sku?: string;
+    [key: string]: any;
+  };
+  addons_snapshot?: {
+    options?: string[];
+    addons?: any[];
+    notes?: string;
+    [key: string]: any;
+  };
+
+  // Arabic aliases matching ER Diagram
+  لقطة_المنتج?: any;
+  لقطة_المواصفات?: any;
+  لقطة_الإضافات?: any;
 }
 
 export interface Order {
@@ -330,11 +374,18 @@ export interface Order {
   orderNumber?: string;
   orderType?: string;
   orderScope?: string;
-  categoryId?: string;
+  categoryId?: string; // معرف_الفئة من جدول فئة_المتجر
   categoryName?: string;
   storeCategory?: string;
   isGlobalStore?: boolean;
-  clientId?: string;
+  clientId?: string; // معرف_العميل
+  customerId?: string;
+  معرف_العميل?: string;
+  معرف_المتجر?: string;
+  معرف_الفئة?: string;
+  رسوم_التوصيل?: number;
+  الحالة?: string;
+  عناصر_الطلب?: OrderItem[];
   driverId?: string | null;
   driverName?: string | null;
   driverPhone?: string | null;

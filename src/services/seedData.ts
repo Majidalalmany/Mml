@@ -127,6 +127,29 @@ export const INITIAL_CATEGORIES = [
     order: 9,
     status: 'active',
     isActive: true,
+    unitType: 'global_catalog',
+    نوع_الوحدة: 'global_catalog',
+    additionalAttributes: {
+      isExternalShopping: true,
+      allowedPlatforms: ['amazon', 'shein', 'aliexpress'],
+      defaultCurrency: 'USD',
+      shippingPricingMode: 'unified_weight_and_distance',
+      estimatedDeliveryDays: '7 - 12 يوم عمل'
+    },
+    extraProperties: {
+      isExternalShopping: true,
+      allowedPlatforms: ['amazon', 'shein', 'aliexpress'],
+      defaultCurrency: 'USD',
+      shippingPricingMode: 'unified_weight_and_distance',
+      estimatedDeliveryDays: '7 - 12 يوم عمل'
+    },
+    خصائص_إضافية: {
+      isExternalShopping: true,
+      allowedPlatforms: ['amazon', 'shein', 'aliexpress'],
+      defaultCurrency: 'USD',
+      shippingPricingMode: 'unified_weight_and_distance',
+      estimatedDeliveryDays: '7 - 12 يوم عمل'
+    },
     description: 'إدارة واستعراض المتاجر العالمية المعتمدة وطلبات الشحن والتسوق الدولي المباشر (Amazon, SHEIN, AliExpress)'
   }
 ];

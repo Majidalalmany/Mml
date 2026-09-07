@@ -395,16 +395,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           } as Order;
         });
 
-        // Merge with local storage orders (e.g. offline/fallback global orders)
-        try {
-          const localOrders: Order[] = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
-          const map = new Map<string, Order>();
-          localOrders.forEach(o => map.set(o.id || o.orderNumber, o));
-          list.forEach(o => map.set(o.id || o.orderNumber, o));
-          setLiveOrders(Array.from(map.values()));
-        } catch {
-          setLiveOrders(list);
-        }
+        // Set live orders directly from Firestore snapshot without stale localStorage
+        setLiveOrders(list);
       }, (err) => {
         console.warn('Orders onSnapshot error in OrdersManager:', err);
       });
@@ -434,13 +426,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   // Sync prop changes when passed from App
   useEffect(() => {
-    if (orders && orders.length > 0) {
-      setLiveOrders(prev => {
-        const map = new Map<string, Order>();
-        prev.forEach(o => map.set(o.id, o));
-        orders.forEach(o => map.set(o.id, o));
-        return Array.from(map.values());
-      });
+    if (orders) {
+      setLiveOrders(orders);
     }
   }, [orders]);
 
@@ -646,7 +633,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       const timeB = new Date(b.createdAt || 0).getTime();
       return timeB - timeA;
     });
-  }, [safeOrders, safeStores, storeTypeFilter, selectedStatusTab, selectedStoreId, searchTerm]);
+  }, [safeOrders, safeStores, safeCategories, storeTypeFilter, selectedStatusTab, selectedStoreId, selectedCategoryId, searchTerm]);
 
   // Orders assigned to selected driver in Driver View
   const selectedDriver = drivers.find(d => d.id === selectedDriverId) || drivers[0];
@@ -1343,43 +1330,100 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
                     {/* Card Body Details */}
                     {isGlobalOrder ? (
-                      <div className="p-4 space-y-4">
-                        <div className="flex items-center justify-between bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                           <span className="font-bold text-sm text-indigo-900">{order.customerName}</span>
-                           <a href={`tel:${order.customerPhone}`} className="bg-white text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-sm">
-                             <PhoneCall className="w-3 h-3" /> {order.customerPhone || 'اتصال'}
-                           </a>
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center justify-between bg-indigo-50/80 p-3 rounded-xl border border-indigo-100">
+                          <div className="flex items-center gap-2">
+                            <User className="w-4 h-4 text-indigo-700" />
+                            <span className="font-bold text-xs text-indigo-950">{order.customerName}</span>
+                          </div>
+                          {order.customerPhone && (
+                            <a 
+                              href={`tel:${order.customerPhone}`} 
+                              className="bg-white text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-2xs hover:bg-emerald-50 transition-colors"
+                            >
+                              <PhoneCall className="w-3 h-3 text-emerald-600" /> {order.customerPhone}
+                            </a>
+                          )}
                         </div>
+
+                        {/* Store Origin Badge */}
+                        <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                          <span className="text-slate-500 font-bold">المتجر المصدر:</span>
+                          <span className="font-bold text-indigo-700 flex items-center gap-1">
+                            <Globe className="w-3.5 h-3.5" />
+                            {order.storeName || 'المتاجر العالمية'}
+                          </span>
+                        </div>
+
+                        {/* Items List */}
                         <div className="space-y-2">
-                          <span className="text-xs font-bold text-slate-500">المنتجات المطلوبة:</span>
-                          {order.items?.map((item, idx) => (
-                             <div key={idx} className="flex gap-3 text-xs bg-slate-50 p-2 rounded-lg items-center">
-                               <img src={item.imageUrl || item.image || 'https://via.placeholder.com/60'} alt={item.productName} className="w-12 h-12 object-cover rounded-md border" />
-                               <div className="flex-1">
-                                 <p className="font-bold text-slate-800">{item.productName}</p>
-                                 <p className="text-slate-500">الكمية: {item.quantity} | اللون: {item.color || '-'} | المقاس: {item.size || '-'}</p>
-                               </div>
-                             </div>
-                          ))}
+                          <span className="text-xs font-bold text-slate-600 block">المنتجات المطلوبة من المتجر الخارجي:</span>
+                          {order.items && order.items.length > 0 ? (
+                            order.items.map((item, idx) => {
+                              const pName = item.product_snapshot?.name || item.product_snapshot?.productName || (item as any).لقطة_المنتج?.name || item.productName || item.name || 'منتج عالمي';
+                              const pUrl = item.product_snapshot?.productUrl || item.product_snapshot?.sourceUrl || (item as any).لقطة_المنتج?.productUrl || item.productUrl || item.sourceUrl || (item as any).url;
+                              const pImg = item.product_snapshot?.imageUrl || (item as any).لقطة_المنتج?.imageUrl || item.imageUrl || item.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=300&q=80';
+                              const specs = item.specs_snapshot || (item as any).لقطة_المواصفات || {};
+                              const sColor = specs.color || item.color;
+                              const sSize = specs.size || item.size;
+
+                              return (
+                                <div key={idx} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-2">
+                                  <div className="flex gap-2.5 items-center">
+                                    <img 
+                                      src={pImg} 
+                                      alt={pName} 
+                                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0 bg-white" 
+                                      onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-bold text-slate-900 truncate">{pName}</p>
+                                      <p className="text-slate-500 text-[11px] mt-0.5">
+                                        الكمية: <strong className="text-slate-800">{item.quantity || 1}</strong>
+                                        {sColor && ` | اللون: ${sColor}`}
+                                        {sSize && ` | المقاس: ${sSize}`}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {pUrl && (
+                                    <a 
+                                      href={pUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="flex items-center justify-center gap-1.5 w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-1.5 rounded-lg text-xs font-bold border border-indigo-200 transition-colors"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                      <span>فتح رابط المنتج في المتجر الأصلي</span>
+                                    </a>
+                                  )}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="p-3 bg-slate-50 rounded-xl text-center text-slate-500 text-xs">
+                              طلب متجر عالمي بانتظار تسعير ومراجعة الإدارة
+                            </div>
+                          )}
                         </div>
-                        <a href={order.items?.[0]?.url || order.items?.[0]?.productUrl} target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-indigo-600 text-white py-2.5 rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition-colors">
-                          🔗 فتح رابط المنتج في المتجر الأصلي
-                        </a>
-                        <div className="space-y-2 pt-2 border-t">
-                          <input 
-                            type="number" 
-                            placeholder="أدخل السعر النهائي المحسوب (ر.ي)" 
-                            className="w-full text-xs p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500"
-                            value={finalPriceInput[order.id] || ''}
-                            onChange={(e) => setFinalPriceInput({...finalPriceInput, [order.id]: e.target.value})}
-                          />
-                          <button 
-                            onClick={() => handleConfirmGlobalOrder(order)}
-                            disabled={updatingOrderId === order.id}
-                            className="w-full bg-emerald-600 text-white py-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow-md hover:bg-emerald-700 transition-colors"
-                          >
-                             {updatingOrderId === order.id ? 'جاري التأكيد...' : 'تأكيد الطلب بعد الاتصال بالعميل'}
-                          </button>
+
+                        {/* Confirmation & Final Price */}
+                        <div className="space-y-2 pt-2 border-t border-slate-200">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="number" 
+                              placeholder="أدخل السعر النهائي المعتمد (ر.ي)" 
+                              className="w-full text-xs p-2.5 border rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white"
+                              value={finalPriceInput[order.id] || ''}
+                              onChange={(e) => setFinalPriceInput({...finalPriceInput, [order.id]: e.target.value})}
+                            />
+                            <button 
+                              onClick={() => handleConfirmGlobalOrder(order)}
+                              disabled={updatingOrderId === order.id}
+                              className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                            >
+                              {updatingOrderId === order.id ? 'جاري...' : 'تأكيد هاتفياً 📞'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -2618,27 +2662,42 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 </div>
               </div>
 
-              {/* Driver & Invoice Info */}
-              <div className="space-y-1.5">
-                <span className="font-bold text-slate-800 block">معلومات التوصيل والفاتورة:</span>
-                <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 space-y-2 text-purple-950">
-                  <p><span className="text-purple-600 font-bold">المندوب المسند:</span> <strong>{viewingOrder.driverName || 'لم يتم التحديد بعد'}</strong> {viewingOrder.driverPhone ? `(${viewingOrder.driverPhone})` : ''}</p>
-                  <p><span className="text-purple-600 font-bold">ملاحظة الفاتورة:</span> <strong className="font-mono text-emerald-800">{viewingOrder.invoiceNumber || 'تم إرفاق صورة الفاتورة'}</strong></p>
-                  
-                  {viewingOrder.invoiceImageUrl && (
-                    <div className="pt-2 border-t border-purple-200 space-y-1">
-                      <span className="text-xs font-bold text-purple-900 block">صورة الفاتورة المرفوعة من المندوب:</span>
-                      <div className="rounded-xl overflow-hidden border border-purple-200 bg-slate-900 flex justify-center p-2 max-h-48">
-                        <img 
-                          src={viewingOrder.invoiceImageUrl} 
-                          alt="صورة الفاتورة الورقية" 
-                          className="max-h-44 object-contain rounded"
-                        />
-                      </div>
-                    </div>
-                  )}
+              {/* Driver & Invoice Info OR Global Order Service Info */}
+              {isOrderGlobal(viewingOrder) ? (
+                <div className="bg-indigo-50 p-3.5 rounded-xl border border-indigo-200 space-y-1.5 text-indigo-950">
+                  <div className="flex items-center justify-between">
+                    <p className="font-bold flex items-center gap-1.5 text-indigo-800 text-xs">
+                      <Globe className="w-4 h-4" />
+                      <span>نوع الخدمة: شحن واستيراد دولي (المتاجر العالمية)</span>
+                    </p>
+                    <span className="bg-indigo-100 text-indigo-900 text-[10px] font-bold px-2 py-0.5 rounded-full">طلب خارجي</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-700">
+                    المتجر المصدر: <strong>{viewingOrder.storeName || 'متجر دولي'}</strong> — يتم شحن البضائع واستلامها في مستودعات التجميع الدولية قبل التوصيل للعميل.
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <span className="font-bold text-slate-800 block">معلومات التوصيل والفاتورة:</span>
+                  <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 space-y-2 text-purple-950">
+                    <p><span className="text-purple-600 font-bold">المندوب المسند:</span> <strong>{viewingOrder.driverName || 'لم يتم التحديد بعد'}</strong> {viewingOrder.driverPhone ? `(${viewingOrder.driverPhone})` : ''}</p>
+                    <p><span className="text-purple-600 font-bold">ملاحظة الفاتورة:</span> <strong className="font-mono text-emerald-800">{viewingOrder.invoiceNumber || 'تم إرفاق صورة الفاتورة'}</strong></p>
+                    
+                    {viewingOrder.invoiceImageUrl && (
+                      <div className="pt-2 border-t border-purple-200 space-y-1">
+                        <span className="text-xs font-bold text-purple-900 block">صورة الفاتورة المرفوعة من المندوب:</span>
+                        <div className="rounded-xl overflow-hidden border border-purple-200 bg-slate-900 flex justify-center p-2 max-h-48">
+                          <img 
+                            src={viewingOrder.invoiceImageUrl} 
+                            alt="صورة الفاتورة الورقية" 
+                            className="max-h-44 object-contain rounded"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Items breakdown */}
               <div className="space-y-2">
@@ -2703,16 +2762,29 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               </div>
 
               {/* Total Calculation */}
-              <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 space-y-1 text-slate-800 font-bold">
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-normal">رسوم التوصيل:</span>
-                  <span className="font-mono">{(viewingOrder.deliveryFee || 400).toLocaleString()} ر.ي</span>
+              {isOrderGlobal(viewingOrder) ? (
+                <div className="bg-indigo-50/70 p-3.5 rounded-xl border border-indigo-200 space-y-1 text-slate-800 font-bold">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-normal">الشحن الخارجي والتخليص:</span>
+                    <span className="font-mono">{(viewingOrder.deliveryFee || 0) > 0 ? `${(viewingOrder.deliveryFee || 0).toLocaleString()} ر.ي` : 'يحدد هاتفياً'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-1 border-t border-indigo-200">
+                    <span>الإجمالي الكلي المعتمد:</span>
+                    <span className="text-indigo-700 font-mono text-base">{viewingOrder.total?.toLocaleString()} ر.ي</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-sm pt-1 border-t border-blue-200">
-                  <span>الإجمالي الكلي المستحق:</span>
-                  <span className="text-blue-700 font-mono text-base">{viewingOrder.total?.toLocaleString()} ر.ي</span>
+              ) : (
+                <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 space-y-1 text-slate-800 font-bold">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-normal">رسوم التوصيل:</span>
+                    <span className="font-mono">{(viewingOrder.deliveryFee || 400).toLocaleString()} ر.ي</span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-1 border-t border-blue-200">
+                    <span>الإجمالي الكلي المستحق:</span>
+                    <span className="text-blue-700 font-mono text-base">{viewingOrder.total?.toLocaleString()} ر.ي</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="p-4 bg-slate-50 border-t border-gray-100 flex items-center justify-between">

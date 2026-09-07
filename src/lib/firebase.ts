@@ -1,15 +1,85 @@
-// Offline Mock Database & Reactive Store Engine (100% Client-Side / Offline Mode)
-// Provides instant, zero-latency operations with localStorage persistence and real-time updates
-
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
-  INITIAL_CATEGORIES, 
-  INITIAL_STORES, 
-  INITIAL_PRODUCTS, 
-  INITIAL_ADMIN_USERS, 
-  INITIAL_ORDERS, 
-  INITIAL_AUDIT_LOGS, 
-  INITIAL_SUPPORT_TICKETS 
-} from '../services/seedData';
+  getFirestore, 
+  collection, 
+  doc, 
+  addDoc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  orderBy, 
+  getDocs, 
+  getDoc, 
+  writeBatch, 
+  serverTimestamp,
+  type DocumentReference,
+  type CollectionReference,
+  type QueryConstraint,
+  type Query,
+  type DocumentSnapshot,
+  type QuerySnapshot,
+  type Firestore
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  type User as FirebaseUser,
+  type Auth
+} from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+
+// Initialize Firebase App
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+// Explicitly pass firestoreDatabaseId from firebase-applet-config.json to prevent connecting to wrong (default) database
+export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const auth: Auth = getAuth(app);
+
+// Re-export Firestore and Auth functions
+export {
+  collection,
+  doc,
+  addDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  getDoc,
+  writeBatch,
+  serverTimestamp,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence
+};
+
+export type {
+  DocumentReference,
+  CollectionReference,
+  QueryConstraint,
+  Query,
+  DocumentSnapshot,
+  QuerySnapshot,
+  FirebaseUser,
+  Firestore,
+  Auth
+};
 
 // Initial Demo Drivers for Yemen Fleet Tracking
 export const INITIAL_DEMO_DRIVERS = [
@@ -248,528 +318,6 @@ export const INITIAL_INVOICES = [
     createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString()
   }
 ];
-
-// Helper to seed or retrieve local collection data
-function getInitialDataForCollection(collectionName: string): any[] {
-  switch (collectionName) {
-    case 'categories':
-      return INITIAL_CATEGORIES.map((cat, idx) => ({ id: `cat-${idx + 1}`, ...cat }));
-    case 'stores': {
-      const catMap: Record<string, string> = {
-        'محلات عصائر ومرطبات': 'cat-1',
-        'سوبرماركت وبقالة': 'cat-2',
-        'محلات ملابس وموضة': 'cat-3',
-        'مطاعم ومقاهي': 'cat-4',
-        'مخابز وحلويات': 'cat-5',
-        'صيدليات ومستلزمات طبية': 'cat-6',
-        'إلكترونيات وجوالات': 'cat-7',
-        'بهارات وعطارة': 'cat-8'
-      };
-      return INITIAL_STORES.map((st, idx) => ({
-        id: `store-${idx + 1}`,
-        categoryId: catMap[st.categoryName] || 'cat-1',
-        ...st
-      }));
-    }
-    case 'products': {
-      const catMap: Record<string, string> = {
-        'محلات عصائر ومرطبات': 'cat-1',
-        'سوبرماركت وبقالة': 'cat-2',
-        'محلات ملابس وموضة': 'cat-3',
-        'مطاعم ومقاهي': 'cat-4',
-        'مخابز وحلويات': 'cat-5',
-        'صيدليات ومستلزمات طبية': 'cat-6',
-        'إلكترونيات وجوالات': 'cat-7',
-        'بهارات وعطارة': 'cat-8'
-      };
-      const storeMap: Record<string, string> = {
-        'عصائر ومرطبات الفردوس': 'store-1',
-        'بوتيك الأناقة للملابس الجاهزة': 'store-2',
-        'سوبر ماركت الوفاء التجاري': 'store-3',
-        'مطعم الشيباني الفاخر': 'store-4',
-        'مخبز وحلويات الروضة الملكية': 'store-5',
-        'صيدلية ابن حيان الكبرى': 'store-6',
-        'مركز المدينة للإلكترونيات والجوالات': 'store-7'
-      };
-      return INITIAL_PRODUCTS.map((prod, idx) => ({
-        id: `prod-${idx + 1}`,
-        categoryId: catMap[prod.categoryName] || 'cat-1',
-        storeId: storeMap[prod.storeName] || 'store-1',
-        ...prod
-      }));
-    }
-    case 'adminUsers':
-      return INITIAL_ADMIN_USERS.map((usr, idx) => ({ id: `admin-${idx + 1}`, ...usr }));
-    case 'orders':
-      return INITIAL_ORDERS.map((ord, idx) => ({ id: `order-${idx + 1}`, ...ord }));
-    case 'audit_logs':
-      return INITIAL_AUDIT_LOGS.map((log, idx) => ({ id: `log-${idx + 1}`, ...log }));
-    case 'support_tickets':
-      return INITIAL_SUPPORT_TICKETS.map((tck, idx) => ({ id: `ticket-${idx + 1}`, ...tck }));
-    case 'drivers':
-      return INITIAL_DEMO_DRIVERS;
-    case 'fazaa_categories':
-      return INITIAL_FAZAA_CATEGORIES;
-    case 'fazaa_orders':
-      return INITIAL_FAZAA_ORDERS;
-    case 'app_users':
-      return INITIAL_APP_USERS;
-    case 'driver_invoices':
-      return INITIAL_INVOICES;
-    default:
-      return [];
-  }
-}
-
-const STORAGE_PREFIX = 'jahez_offline_db_';
-
-function getLocalCollection(collectionName: string): any[] {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${collectionName}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-    // Auto-seed initial data
-    const initial = getInitialDataForCollection(collectionName);
-    localStorage.setItem(`${STORAGE_PREFIX}${collectionName}`, JSON.stringify(initial));
-    return initial;
-  } catch (e) {
-    console.warn(`Local DB read error for ${collectionName}:`, e);
-    return getInitialDataForCollection(collectionName);
-  }
-}
-
-function saveLocalCollection(collectionName: string, data: any[]): void {
-  try {
-    localStorage.setItem(`${STORAGE_PREFIX}${collectionName}`, JSON.stringify(data));
-    // Broadcast change event
-    window.dispatchEvent(new CustomEvent('local_store_changed', { detail: { collectionName } }));
-  } catch (e) {
-    console.warn(`Local DB write error for ${collectionName}:`, e);
-  }
-}
-
-// -------------------------------------------------------------
-// Core Firestore Types & Interfaces
-// -------------------------------------------------------------
-
-export interface DocumentReference {
-  id: string;
-  path: string;
-  _collectionName: string;
-}
-
-export interface CollectionReference {
-  id: string;
-  path: string;
-  _collectionName: string;
-}
-
-export interface QueryConstraint {
-  type: 'where' | 'orderBy';
-  field?: string;
-  op?: string;
-  value?: any;
-  direction?: 'asc' | 'desc';
-}
-
-export interface Query {
-  _collectionName: string;
-  _constraints: QueryConstraint[];
-}
-
-export interface DocumentSnapshot {
-  id: string;
-  exists: () => boolean;
-  data: () => Record<string, any>;
-}
-
-export interface QuerySnapshot {
-  empty: boolean;
-  size: number;
-  docs: DocumentSnapshot[];
-  forEach: (callback: (doc: DocumentSnapshot) => void) => void;
-}
-
-// -------------------------------------------------------------
-// Database Instance Mock
-// -------------------------------------------------------------
-
-export const db = {
-  _type: 'offline_mock_firestore',
-  app: { name: '[DEFAULT]' }
-};
-
-// -------------------------------------------------------------
-// Firestore Methods
-// -------------------------------------------------------------
-
-export function collection(_db: any, collectionName: string): CollectionReference {
-  return {
-    id: collectionName,
-    path: collectionName,
-    _collectionName: collectionName
-  };
-}
-
-export function doc(
-  first: any, 
-  second?: string, 
-  third?: string
-): DocumentReference {
-  let colName = '';
-  let docId = '';
-
-  if (third !== undefined) {
-    colName = second || '';
-    docId = third;
-  } else if (second !== undefined) {
-    if (typeof first === 'object' && first?._collectionName) {
-      colName = first._collectionName;
-      docId = second;
-    } else {
-      colName = first;
-      docId = second;
-    }
-  } else {
-    colName = 'general';
-    docId = String(first);
-  }
-
-  return {
-    id: docId,
-    path: `${colName}/${docId}`,
-    _collectionName: colName
-  };
-}
-
-export function where(field: string, op: string, value: any): QueryConstraint {
-  return { type: 'where', field, op, value };
-}
-
-export function orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): QueryConstraint {
-  return { type: 'orderBy', field, direction };
-}
-
-export function query(
-  colOrQuery: CollectionReference | Query, 
-  ...constraints: QueryConstraint[]
-): Query {
-  const colName = colOrQuery._collectionName;
-  const existingConstraints = (colOrQuery as Query)._constraints || [];
-  return {
-    _collectionName: colName,
-    _constraints: [...existingConstraints, ...constraints]
-  };
-}
-
-function evaluateQuery(collectionName: string, constraints: QueryConstraint[] = []): any[] {
-  let items = getLocalCollection(collectionName);
-
-  for (const c of constraints) {
-    if (c.type === 'where' && c.field && c.op !== undefined) {
-      items = items.filter(item => {
-        const val = item[c.field!];
-        switch (c.op) {
-          case '==':
-            return val === c.value;
-          case '!=':
-            return val !== c.value;
-          case '>':
-            return val > c.value;
-          case '>=':
-            return val >= c.value;
-          case '<':
-            return val < c.value;
-          case '<=':
-            return val <= c.value;
-          case 'array-contains':
-            return Array.isArray(val) && val.includes(c.value);
-          default:
-            return true;
-        }
-      });
-    } else if (c.type === 'orderBy' && c.field) {
-      items = [...items].sort((a, b) => {
-        const valA = a[c.field!] || '';
-        const valB = b[c.field!] || '';
-        if (valA < valB) return c.direction === 'desc' ? 1 : -1;
-        if (valA > valB) return c.direction === 'desc' ? -1 : 1;
-        return 0;
-      });
-    }
-  }
-
-  return items;
-}
-
-function buildSnapshot(items: any[]): QuerySnapshot {
-  const docs: DocumentSnapshot[] = items.map(item => ({
-    id: String(item.id || ''),
-    exists: () => true,
-    data: () => ({ ...item })
-  }));
-
-  return {
-    empty: docs.length === 0,
-    size: docs.length,
-    docs,
-    forEach: (cb) => docs.forEach(cb)
-  };
-}
-
-export async function getDocs(queryOrCol: CollectionReference | Query): Promise<QuerySnapshot> {
-  const colName = queryOrCol._collectionName;
-  const constraints = (queryOrCol as Query)._constraints || [];
-  const items = evaluateQuery(colName, constraints);
-  return buildSnapshot(items);
-}
-
-export async function getDoc(docRef: DocumentReference): Promise<DocumentSnapshot> {
-  const colName = docRef._collectionName;
-  const items = getLocalCollection(colName);
-  const found = items.find(item => String(item.id) === String(docRef.id));
-  return {
-    id: docRef.id,
-    exists: () => !!found,
-    data: () => found ? { ...found } : {}
-  };
-}
-
-export async function addDoc(colRef: CollectionReference, data: Record<string, any>): Promise<DocumentReference> {
-  const colName = colRef._collectionName;
-  const items = getLocalCollection(colName);
-  const newId = `${colName.slice(0, 4)}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-  const newItem = {
-    ...data,
-    id: newId,
-    createdAt: data.createdAt || new Date().toISOString(),
-    updatedAt: data.updatedAt || new Date().toISOString()
-  };
-
-  items.unshift(newItem);
-  saveLocalCollection(colName, items);
-
-  return {
-    id: newId,
-    path: `${colName}/${newId}`,
-    _collectionName: colName
-  };
-}
-
-export async function setDoc(
-  docRef: DocumentReference, 
-  data: Record<string, any>, 
-  options?: { merge?: boolean }
-): Promise<void> {
-  const colName = docRef._collectionName;
-  const items = getLocalCollection(colName);
-  const index = items.findIndex(item => String(item.id) === String(docRef.id));
-
-  if (index >= 0) {
-    if (options?.merge) {
-      items[index] = { ...items[index], ...data, id: docRef.id, updatedAt: new Date().toISOString() };
-    } else {
-      items[index] = { ...data, id: docRef.id, updatedAt: new Date().toISOString() };
-    }
-  } else {
-    items.unshift({ ...data, id: docRef.id, createdAt: data.createdAt || new Date().toISOString() });
-  }
-
-  saveLocalCollection(colName, items);
-}
-
-export async function updateDoc(docRef: DocumentReference, data: Record<string, any>): Promise<void> {
-  const colName = docRef._collectionName;
-  const items = getLocalCollection(colName);
-  const index = items.findIndex(item => String(item.id) === String(docRef.id));
-
-  if (index >= 0) {
-    items[index] = {
-      ...items[index],
-      ...data,
-      updatedAt: new Date().toISOString()
-    };
-    saveLocalCollection(colName, items);
-  }
-}
-
-export async function deleteDoc(docRef: DocumentReference): Promise<void> {
-  const colName = docRef._collectionName;
-  let items = getLocalCollection(colName);
-  items = items.filter(item => String(item.id) !== String(docRef.id));
-  saveLocalCollection(colName, items);
-}
-
-export function onSnapshot(
-  queryOrCol: CollectionReference | Query,
-  onNext: (snapshot: QuerySnapshot) => void,
-  _onError?: (error: Error) => void
-): () => void {
-  const colName = queryOrCol._collectionName;
-  const constraints = (queryOrCol as Query)._constraints || [];
-
-  // Trigger initial snapshot immediately
-  const sendFreshSnapshot = () => {
-    try {
-      const items = evaluateQuery(colName, constraints);
-      onNext(buildSnapshot(items));
-    } catch (err: any) {
-      console.warn('Snapshot error:', err);
-    }
-  };
-
-  sendFreshSnapshot();
-
-  const handleStoreChange = (e: Event) => {
-    const customEvt = e as CustomEvent;
-    if (!customEvt.detail || customEvt.detail.collectionName === colName) {
-      sendFreshSnapshot();
-    }
-  };
-
-  const handleStorageEvent = (e: StorageEvent) => {
-    if (e.key === `${STORAGE_PREFIX}${colName}`) {
-      sendFreshSnapshot();
-    }
-  };
-
-  window.addEventListener('local_store_changed', handleStoreChange);
-  window.addEventListener('storage', handleStorageEvent);
-
-  return () => {
-    window.removeEventListener('local_store_changed', handleStoreChange);
-    window.removeEventListener('storage', handleStorageEvent);
-  };
-}
-
-export function serverTimestamp(): string {
-  return new Date().toISOString();
-}
-
-export function writeBatch(_db?: any) {
-  const operations: Array<() => void> = [];
-
-  return {
-    set(docRef: DocumentReference, data: any, options?: { merge?: boolean }) {
-      operations.push(() => setDoc(docRef, data, options));
-    },
-    update(docRef: DocumentReference, data: any) {
-      operations.push(() => updateDoc(docRef, data));
-    },
-    delete(docRef: DocumentReference) {
-      operations.push(() => deleteDoc(docRef));
-    },
-    async commit() {
-      for (const op of operations) {
-        op();
-      }
-    }
-  };
-}
-
-// -------------------------------------------------------------
-// Auth Mock Engine
-// -------------------------------------------------------------
-
-export interface FirebaseUser {
-  uid: string;
-  email: string | null;
-  displayName: string | null;
-  photoURL?: string | null;
-}
-
-class MockAuth {
-  currentUser: FirebaseUser | null = null;
-  private listeners: Array<(user: FirebaseUser | null) => void> = [];
-
-  constructor() {
-    try {
-      const saved = localStorage.getItem('jahez_auth_user');
-      if (saved) {
-        const u = JSON.parse(saved);
-        this.currentUser = {
-          uid: u.id || 'admin-1',
-          email: u.email || 'majdallmany3@gmail.com',
-          displayName: u.name || 'مجد الألماني (المدير العام)'
-        };
-      }
-    } catch {
-      this.currentUser = null;
-    }
-  }
-
-  notify() {
-    this.listeners.forEach(cb => cb(this.currentUser));
-  }
-
-  onAuthStateChanged(callback: (user: FirebaseUser | null) => void) {
-    this.listeners.push(callback);
-    callback(this.currentUser);
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== callback);
-    };
-  }
-}
-
-export const auth = new MockAuth();
-
-export async function signInWithEmailAndPassword(
-  _authInstance: any, 
-  email: string, 
-  _password?: string
-) {
-  const users = getLocalCollection('adminUsers');
-  const found = users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
-
-  const mockUser: FirebaseUser = {
-    uid: found?.id || 'admin-1',
-    email: email,
-    displayName: found?.name || email.split('@')[0]
-  };
-
-  auth.currentUser = mockUser;
-  auth.notify();
-
-  return { user: mockUser };
-}
-
-export async function createUserWithEmailAndPassword(
-  _authInstance: any, 
-  email: string, 
-  _password?: string
-) {
-  const mockUser: FirebaseUser = {
-    uid: `user-${Date.now()}`,
-    email: email,
-    displayName: email.split('@')[0]
-  };
-
-  auth.currentUser = mockUser;
-  auth.notify();
-
-  return { user: mockUser };
-}
-
-export async function signOut(_authInstance?: any) {
-  auth.currentUser = null;
-  localStorage.removeItem('jahez_auth_user');
-  auth.notify();
-}
-
-export function onAuthStateChanged(
-  _authInstance: any, 
-  callback: (user: FirebaseUser | null) => void
-) {
-  return auth.onAuthStateChanged(callback);
-}
-
-export async function setPersistence(_auth: any, _persistence: any) {
-  return Promise.resolve();
-}
-
-export const browserLocalPersistence = 'LOCAL';
-export const browserSessionPersistence = 'SESSION';
 
 export default {
   db,

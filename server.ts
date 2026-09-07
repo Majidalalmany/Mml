@@ -322,80 +322,37 @@ async function startServer() {
   });
 
   // ==================== UNIFIED GENERAL & GLOBAL ORDERS API ====================
-  let inMemoryOrders: any[] = [
-    {
-      id: "ord-glb-901",
-      orderNumber: "GLB-748921",
-      customerName: "محمد عبده الأهدل",
-      customerPhone: "777654321",
-      address: "صنعاء - شارع حدة، عمارة الإسكان",
-      deliveryAddress: "صنعاء - شارع حدة، عمارة الإسكان",
-      pickupAddress: "مستودعات الشحن الدولي (أمازون)",
-      storeId: "global-store-amazon",
-      storeName: "أمازون العالمية (Amazon)",
-      categoryId: "global_stores",
-      categoryName: "المتاجر العالمية",
-      storeCategory: "المتاجر العالمية",
-      isGlobalStore: true,
-      serviceType: "global_store",
-      orderScope: "international",
-      orderType: "طلب متجر عالمي (2 أصناف)",
-      total: 38500,
-      itemsTotal: 38500,
-      deliveryFee: 0,
-      status: "pending_review",
-      needsAdminReview: true,
-      itemsCount: 2,
-      items: [
-        {
-          name: "ساعة ذكية مقاومة للماء مع مراقب ضربات القلب",
-          productName: "ساعة ذكية مقاومة للماء مع مراقب ضربات القلب",
-          productId: "AMZ-WTCH-01",
-          price: 18500,
-          quantity: 1,
-          totalPrice: 18500,
-          imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80",
-          productUrl: "https://www.amazon.com/dp/B09B8V1LZ3",
-          sourceUrl: "https://www.amazon.com/dp/B09B8V1LZ3",
-          size: "42mm",
-          color: "أسود ملكي",
-          storeName: "أمازون العالمية (Amazon)"
-        },
-        {
-          name: "سماعة أذن بلوتوث لاسلكية عازلة للضوضاء",
-          productName: "سماعة أذن بلوتوث لاسلكية عازلة للضوضاء",
-          productId: "AMZ-EAR-02",
-          price: 20000,
-          quantity: 1,
-          totalPrice: 20000,
-          imageUrl: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80",
-          productUrl: "https://www.amazon.com/dp/B08PZHYWJS",
-          sourceUrl: "https://www.amazon.com/dp/B08PZHYWJS",
-          size: "قياسي",
-          color: "فضي",
-          storeName: "أمازون العالمية (Amazon)"
-        }
-      ],
-      paymentMethod: "cash_on_delivery",
-      paymentStatus: "pending",
-      notes: "طلب مباشر من تطبيق العميل للشحن إلى صنعاء.",
-      createdAt: new Date(Date.now() - 1200000).toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-  ];
+  let inMemoryOrders: any[] = [];
 
   // GET /api/orders - List all orders (with optional type/category filter)
   app.get("/api/orders", (req, res) => {
-    const { categoryId, storeId, serviceType, isGlobal } = req.query;
-    let list = [...inMemoryOrders];
-    if (categoryId) list = list.filter(o => o.categoryId === categoryId);
-    if (storeId) list = list.filter(o => o.storeId === storeId);
-    if (serviceType) list = list.filter(o => o.serviceType === serviceType);
-    if (isGlobal !== undefined) {
-      const wantGlobal = isGlobal === 'true' || isGlobal === '1';
-      list = list.filter(o => Boolean(o.isGlobalStore) === wantGlobal);
+    try {
+      const { categoryId, storeId, serviceType, isGlobal } = req.query;
+      let list = [...inMemoryOrders];
+      if (categoryId) list = list.filter(o => o.categoryId === categoryId);
+      if (storeId) list = list.filter(o => o.storeId === storeId);
+      if (serviceType) list = list.filter(o => o.serviceType === serviceType);
+      if (isGlobal !== undefined) {
+        const wantGlobal = isGlobal === 'true' || isGlobal === '1';
+        list = list.filter(o => Boolean(o.isGlobalStore) === wantGlobal);
+      }
+      res.json({ orders: list, count: list.length });
+    } catch (err: any) {
+      console.error("Error reading orders:", err);
+      res.status(500).json({ error: "فشل استرجاع الطلبات", orders: [] });
     }
-    res.json({ orders: list, count: list.length });
+  });
+
+  // DELETE /api/orders/:id - Remove order from cache
+  app.delete("/api/orders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      inMemoryOrders = inMemoryOrders.filter(o => o.id !== id && o.orderNumber !== id);
+      res.json({ success: true, message: "تم حذف الطلب" });
+    } catch (err: any) {
+      console.error("Error deleting order:", err);
+      res.status(500).json({ error: "فشل حذف الطلب" });
+    }
   });
 
   // POST /api/orders & /api/global-stores/orders - Create or accept new order from Client App

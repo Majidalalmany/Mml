@@ -222,24 +222,9 @@ export default function App() {
     return () => unsubscribeUsers();
   }, []);
 
-  // 5. Orders Firestore Realtime Listener & API sync
+  // 5. Orders Firestore Realtime Listener (Single Source of Truth)
   useEffect(() => {
     setIsLoadingOrders(true);
-
-    // Sync from server REST API (orders placed via mobile app / external clients)
-    fetch('/api/orders')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.orders && Array.isArray(data.orders) && data.orders.length > 0) {
-          setOrders(prev => {
-            const map = new Map<string, Order>();
-            prev.forEach(o => map.set(o.id || o.orderNumber, o));
-            data.orders.forEach((o: Order) => map.set(o.id || o.orderNumber, o));
-            return Array.from(map.values());
-          });
-        }
-      })
-      .catch(() => {});
 
     const ordersQuery = query(collection(db, 'orders'));
 
@@ -249,22 +234,10 @@ export default function App() {
         ...doc.data()
       })) as Order[];
 
-      try {
-        const localSaved: Order[] = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
-        const map = new Map<string, Order>();
-        localSaved.forEach(o => map.set(o.id || o.orderNumber, o));
-        oList.forEach(o => map.set(o.id || o.orderNumber, o));
-        setOrders(Array.from(map.values()));
-      } catch {
-        setOrders(oList);
-      }
+      setOrders(oList);
       setIsLoadingOrders(false);
     }, (error) => {
-      console.warn('Orders listener fallback:', error);
-      try {
-        const localSaved: Order[] = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
-        if (localSaved.length > 0) setOrders(localSaved);
-      } catch {}
+      console.warn('Orders listener error:', error);
       setIsLoadingOrders(false);
     });
 
@@ -742,20 +715,6 @@ export default function App() {
       }
     } catch (err: any) {
       console.warn('Firestore updateDoc warning, fallback to local sync:', err);
-    }
-
-    // Always update localStorage cache
-    try {
-      const localSaved: Order[] = JSON.parse(localStorage.getItem('jahez_saved_orders') || '[]');
-      const updatedSaved = localSaved.map(o => (o.id === orderId || o.orderNumber === orderId) ? {
-        ...o,
-        status: newStatus,
-        updatedAt: new Date().toISOString(),
-        ...(extraData || {})
-      } : o);
-      localStorage.setItem('jahez_saved_orders', JSON.stringify(updatedSaved));
-    } catch (e) {
-      console.warn('LocalStorage update warning:', e);
     }
 
     // Update in-memory orders state

@@ -27,7 +27,9 @@ import {
   Bike,
   Route,
   Clock,
+  Eye,
   EyeOff,
+  Lock,
   Globe
 } from 'lucide-react';
 import L from 'leaflet';
@@ -373,7 +375,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     name: '',
     phone: '',
     email: '',
-    password: 'driver123Password',
+    password: '',
     vehicleType: 'دراجة نارية',
     plateNumber: '',
     status: 'active' as 'active' | 'pending' | 'suspended',
@@ -382,6 +384,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     lng: 44.1910,
     locationName: 'صنعاء'
   });
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   // Path / Trail Tracking States
@@ -1106,7 +1109,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       name: '',
       phone: '',
       email: '',
-      password: 'driver123Password',
+      password: '',
       vehicleType: 'دراجة نارية',
       plateNumber: '',
       status: 'active',
@@ -1115,6 +1118,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       lng: 44.1910,
       locationName: 'صنعاء'
     });
+    setShowPassword(false);
     setFormError(null);
     setIsAddModalOpen(true);
   };
@@ -1126,7 +1130,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       name: driver.name || '',
       phone: driver.phone || '',
       email: driver.email || '',
-      password: '',
+      password: driver.password || '',
       vehicleType: driver.vehicleType || 'دراجة نارية',
       plateNumber: driver.plateNumber || '',
       status: driver.status || 'active',
@@ -1135,6 +1139,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       lng: driver.lng || 44.1910,
       locationName: driver.locationName || 'صنعاء'
     });
+    setShowPassword(false);
     setFormError(null);
     setIsAddModalOpen(true);
   };
@@ -1151,6 +1156,16 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
     if (!formData.phone.trim()) {
       setFormError('يرجى إدخال رقم الهاتف / الجوال (المعرف الإجباري والوحيد للمندوب)');
+      return;
+    }
+
+    if (!editingDriver && !formData.password.trim()) {
+      setFormError('يرجى كتابة كلمة المرور للدخول (إلزامية عند إضافة مندوب جديد)');
+      return;
+    }
+
+    if (formData.password.trim() && formData.password.trim().length < 6) {
+      setFormError('كلمة المرور يجب أن لا تقل عن 6 خانات/أحرف');
       return;
     }
 
@@ -1179,6 +1194,10 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
           updatedAt: new Date().toISOString()
         };
 
+        if (formData.password.trim()) {
+          updatePayload.password = formData.password.trim();
+        }
+
         await updateDoc(driverRef, updatePayload);
         onShowToast?.(`تم تحديث بيانات المندوب "${formData.name}" في Firestore بنجاح`, 'success');
       } else {
@@ -1189,6 +1208,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
           name: formData.name.trim(),
           phone: formData.phone.trim(),
           email: formData.email.trim(),
+          password: formData.password.trim(),
           vehicleType: formData.vehicleType,
           plateNumber: formData.plateNumber.trim(),
           status: formData.status,
@@ -1534,6 +1554,17 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                     📍 {selectedDriver.lat?.toFixed(4)}, {selectedDriver.lng?.toFixed(4)}
                   </span>
                 </div>
+                {selectedDriver.password && (
+                  <div className="col-span-2 bg-blue-50/80 p-1.5 rounded-lg border border-blue-100 flex items-center justify-between text-[11px]">
+                    <span className="text-blue-900 font-bold flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-blue-600" />
+                      <span>كلمة المرور للدخول:</span>
+                    </span>
+                    <span className="font-mono text-blue-800 font-bold bg-white px-2 py-0.5 rounded border border-blue-200">
+                      {selectedDriver.password}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Active Delivery Specific Destination Section */}
@@ -1911,6 +1942,41 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono bg-gray-50/50"
                   />
                 </div>
+              </div>
+
+              {/* Password Field (إجباري وبارز للدخول) */}
+              <div className="space-y-1.5 bg-blue-50/60 p-3 rounded-xl border border-blue-200">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-blue-600" />
+                    <span>كلمة المرور للدخول {editingDriver ? <span className="text-slate-500 font-normal text-[11px]">(اتركها فارغة للإبقاء على الحالية)</span> : <span className="text-rose-500">*</span>}</span>
+                  </label>
+                  <span className="text-[10px] text-blue-700 font-bold">
+                    {editingDriver ? 'تغيير كلمة المرور' : '6 خانات على الأقل (إجباري)'}
+                  </span>
+                </div>
+                <div className="relative">
+                  <input 
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder={editingDriver ? '•••••••• (غير معدلة)' : 'أدخل كلمة مرور الدخول (لا تقل عن 6 خانات)'}
+                    className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-blue-300 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                    required={!editingDriver}
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 transition-colors"
+                    title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  تُستخدم كلمة المرور هذه لتسجيل دخول الكابتن/المندوب إلى تطبيقه عبر رقم هاتفه المحمول.
+                </p>
               </div>
 
               {/* Vehicle Type & Plate Number */}

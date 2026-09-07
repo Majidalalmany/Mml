@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserCheck, Shield, Check, Lock, Building, Phone, Mail, User, Key } from 'lucide-react';
+import { X, UserCheck, Shield, Check, Lock, Building, Phone, Mail, User, Key, Eye, EyeOff } from 'lucide-react';
 import { AdminUser, Store, RoleType } from '../types';
 import { ROLE_DEFINITIONS, ALL_MODULES } from '../lib/permissions';
 import { checkDuplicateUserPhone } from '../lib/phoneUtils';
@@ -24,6 +24,7 @@ export const UserModal: React.FC<UserModalProps> = ({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<RoleType>('stores_manager');
   const [storeId, setStoreId] = useState<string>('all');
@@ -46,13 +47,14 @@ export const UserModal: React.FC<UserModalProps> = ({
     } else {
       setName('');
       setEmail('');
-      setPassword('password123');
-      setPhone('771122334');
+      setPassword('');
+      setPhone('');
       setRole('stores_manager');
       setStoreId('all');
       setStatus('active');
       setPermissions(ROLE_DEFINITIONS.stores_manager.defaultPermissions);
     }
+    setShowPassword(false);
     setError(null);
   }, [user, isOpen]);
 
@@ -97,6 +99,16 @@ export const UserModal: React.FC<UserModalProps> = ({
       return;
     }
 
+    if (!user && !password.trim()) {
+      setError('يرجى كتابة كلمة المرور للدخول (إلزامية عند إنشاء حساب موظف جديد)');
+      return;
+    }
+
+    if (password.trim() && password.trim().length < 6) {
+      setError('كلمة المرور يجب أن لا تقل عن 6 خانات/أحرف');
+      return;
+    }
+
     if (email.trim() && !email.includes('@')) {
       setError('يرجى ادخال بريد إلكتروني صحيح عند إدخاله (البريد اختياري)');
       return;
@@ -107,7 +119,7 @@ export const UserModal: React.FC<UserModalProps> = ({
       await onSave({
         name: name.trim(),
         email: email.trim(),
-        password: password.trim() || 'password123',
+        password: password.trim(),
         phone: phone.trim(),
         role,
         storeId,
@@ -185,6 +197,34 @@ export const UserModal: React.FC<UserModalProps> = ({
                   className="w-full pl-3 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
                   required
                 />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 block">
+                  كلمة المرور للدخول {user ? <span className="text-slate-400 text-[10px] font-normal">(اختياري للإبقاء)</span> : <span className="text-red-500">*</span>}
+                </label>
+              </div>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input 
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={user ? '•••••••• (غير معدلة)' : 'كلمة المرور (6 خانات على الأقل)'}
+                  className="w-full pl-10 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
+                  required={!user}
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1"
+                  title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 

@@ -928,10 +928,14 @@ export default function App() {
 
       if (editingUser) {
         const uRef = doc(db, 'adminUsers', editingUser.id);
-        await updateDoc(uRef, {
+        const updatePayload: Record<string, any> = {
           ...userData,
           updatedAt: new Date().toISOString()
-        });
+        };
+        if (!userData.password || !userData.password.trim()) {
+          delete updatePayload.password;
+        }
+        await updateDoc(uRef, updatePayload);
         showToast(`تم تحديث صلاحيات وعضوية "${userData.name}" بنجاح`);
         await logSystemActivity({
           action: 'تعديل بيانات حساب إداري',

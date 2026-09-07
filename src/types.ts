@@ -582,6 +582,7 @@ export interface DriverUser {
   id: string;
   name: string;
   phone: string;
+  password?: string;
   email?: string;
   vehicleType?: string;
   plateNumber?: string;

@@ -32,8 +32,7 @@ service cloud.firestore {
 
     // 1. Admin Users Collection - Staff & Admin management
     match /adminUsers/{userId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     // 2. Clients Collection - Mobile app end-users
@@ -44,8 +43,7 @@ service cloud.firestore {
 
     // 3. Drivers Collection - Delivery fleet
     match /drivers/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     // 4. Public Catalog (Stores, Products, Categories)

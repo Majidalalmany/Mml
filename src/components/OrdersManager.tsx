@@ -642,10 +642,11 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   }, [safeOrders, safeStores, safeCategories, storeTypeFilter, selectedStatusTab, selectedStoreId, selectedCategoryId, searchTerm]);
 
   // Orders assigned to selected driver in Driver View
-  const selectedDriver = drivers.find(d => d.id === selectedDriverId) || drivers[0];
+  const selectedDriver = drivers.find(d => d.id === selectedDriverId || d.phone === selectedDriverId) || drivers[0];
   const driverAssignedOrders = useMemo(() => {
     if (!selectedDriver) return [];
     return safeOrders.filter(o => 
+      o.driverId === selectedDriver.phone ||
       o.driverId === selectedDriver.id || 
       o.driverName === selectedDriver.name ||
       (o.driverPhone && o.driverPhone === selectedDriver.phone)
@@ -794,14 +795,17 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     try {
       setUpdatingOrderId(orderToAssign.id);
 
-      // 1. Direct update to orders/{orderId} in Firestore
+      const targetDriverPhone = (driver.phone || '').trim();
+      const targetDriverName = (driver.name || '').trim();
+
+      // 1. Direct update to orders/{orderId} in Firestore exactly as expected by driver app
       try {
         if (!orderToAssign.id.startsWith('local-')) {
           await updateDoc(doc(db, 'orders', orderToAssign.id), {
-            driverId: driver.id,
-            driverName: driver.name,
-            driverPhone: driver.phone || '',
-            status: "PREPARING",
+            driverId: targetDriverPhone, // إجبار استخدام رقم الهاتف كمعرف صريح
+            driverName: targetDriverName,
+            driverPhone: targetDriverPhone,
+            status: "PREPARING", // إجبار الحالة على PREPARING بأحرف كبيرة
             updatedAt: new Date().toISOString()
           });
         }
@@ -811,9 +815,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 2. Trigger global App callback
       await onUpdateOrderStatus(orderToAssign.id, 'PREPARING' as any, {
-        driverId: driver.id,
-        driverName: driver.name,
-        driverPhone: driver.phone || '',
+        driverId: targetDriverPhone,
+        driverName: targetDriverName,
+        driverPhone: targetDriverPhone,
         status: 'PREPARING' as any
       });
 
@@ -2148,7 +2152,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       (d.vehicleType && d.vehicleType.includes(driverSearchTerm))
                     )
                     .map((driver) => {
-                      const isCurrentlyAssigned = orderToAssign.driverId === driver.id;
+                      const isCurrentlyAssigned = 
+                        orderToAssign.driverId === driver.phone || 
+                        orderToAssign.driverId === driver.id ||
+                        (orderToAssign.driverPhone && orderToAssign.driverPhone === driver.phone);
 
                       return (
                         <div 

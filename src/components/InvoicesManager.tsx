@@ -66,9 +66,13 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
 
       // Sort by uploadedAt / createdAt descending
       list.sort((a, b) => {
-        const timeA = new Date(a.uploadedAt || a.createdAt || 0).getTime();
-        const timeB = new Date(b.uploadedAt || b.createdAt || 0).getTime();
-        return timeB - timeA;
+        const getDate = (item: any) => {
+          if (item.uploadedAt) return new Date(item.uploadedAt).getTime();
+          if (item.createdAt?.toDate) return item.createdAt.toDate().getTime();
+          if (item.createdAt) return new Date(item.createdAt).getTime();
+          return 0;
+        };
+        return getDate(b) - getDate(a);
       });
 
       setInvoices(list);
@@ -336,7 +340,11 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredInvoices.map((inv) => {
-            const uploadDate = inv.uploadedAt ? new Date(inv.uploadedAt) : new Date();
+            const uploadDate = inv.uploadedAt 
+              ? new Date(inv.uploadedAt) 
+              : ((inv.createdAt as any)?.toDate 
+                  ? (inv.createdAt as any).toDate() 
+                  : (inv.createdAt ? new Date(inv.createdAt as any) : new Date()));
             const formattedDateStr = uploadDate.toLocaleDateString('ar-YE', { year: 'numeric', month: 'short', day: 'numeric' });
             const formattedTimeStr = uploadDate.toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' });
 
@@ -351,13 +359,19 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
                     <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
                     <span>طلب #{inv.orderNumber}</span>
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    inv.orderType === 'manfaa' || inv.orderType === 'fazaa'
-                      ? 'bg-emerald-900 text-emerald-300 border border-emerald-700'
-                      : 'bg-blue-900 text-blue-300 border border-blue-700'
-                  }`}>
-                    {inv.orderType === 'manfaa' || inv.orderType === 'fazaa' ? 'خدمة منفعة' : 'طلب متجر'}
-                  </span>
+                  {inv.invoiceNumber ? (
+                    <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded text-[10px] font-mono font-bold">
+                      {inv.invoiceNumber}
+                    </span>
+                  ) : (
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      inv.orderType === 'manfaa' || inv.orderType === 'fazaa'
+                        ? 'bg-emerald-900 text-emerald-300 border border-emerald-700'
+                        : 'bg-blue-900 text-blue-300 border border-blue-700'
+                    }`}>
+                      {inv.orderType === 'manfaa' || inv.orderType === 'fazaa' ? 'خدمة منفعة' : 'طلب متجر'}
+                    </span>
+                  )}
                 </div>
 
                 {/* Driver Info Bar */}
@@ -407,6 +421,13 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">المتجر/الجهة:</span>
                         <strong className="text-amber-800 font-bold">{inv.storeName}</strong>
+                      </div>
+                    )}
+
+                    {Boolean(inv.amount) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">قيمة الفاتورة:</span>
+                        <strong className="text-emerald-700 font-mono font-bold">{inv.amount?.toLocaleString()} ر.ي</strong>
                       </div>
                     )}
 

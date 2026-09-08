@@ -200,11 +200,15 @@ export const UserModal: React.FC<UserModalProps> = ({
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 bg-blue-50/50 p-3 rounded-xl border border-blue-100">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 block">
-                  كلمة المرور للدخول {user ? <span className="text-slate-400 text-[10px] font-normal">(اختياري للإبقاء)</span> : <span className="text-red-500">*</span>}
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-blue-600" />
+                  <span>كلمة المرور للدخول {user ? <span className="text-slate-400 text-[10px] font-normal">(اختياري للإبقاء على الحالية)</span> : <span className="text-red-500">*</span>}</span>
                 </label>
+                <span className="text-[10px] text-blue-600 font-bold">
+                  {user ? 'تعديل كلمة المرور' : '6 خانات على الأقل (إجباري)'}
+                </span>
               </div>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
@@ -212,20 +216,23 @@ export const UserModal: React.FC<UserModalProps> = ({
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={user ? '•••••••• (غير معدلة)' : 'كلمة المرور (6 خانات على الأقل)'}
-                  className="w-full pl-10 pr-9 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-mono"
+                  placeholder={user ? '•••••••• (غير معدلة)' : 'أدخل كلمة مرور الموظف (لا تقل عن 6 خانات)'}
+                  className="w-full pl-10 pr-9 py-2 rounded-lg border border-blue-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
                   required={!user}
                   minLength={6}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors p-1"
                   title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                يتم استخدام كلمة المرور هذه لتسجيل دخول الموظف إلى لوحة التحكم بصلاحياته المحددة.
+              </p>
             </div>
 
             <div className="space-y-1.5">

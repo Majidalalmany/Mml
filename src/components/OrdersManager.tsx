@@ -46,7 +46,7 @@ import { Order, OrderStatus, Store, Category, AdminUser, DriverUser, VehicleType
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
 import { INITIAL_CATEGORIES } from '../services/seedData';
-import { db, collection, addDoc, onSnapshot, query } from '../lib/firebase';
+import { db, collection, addDoc, onSnapshot, query, doc, updateDoc, serverTimestamp } from '../lib/firebase';
 import { 
   getLocalVehicles, 
   findVehicleType, 
@@ -528,46 +528,50 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   // Filtered orders for Admin View
   const filteredOrders = useMemo(() => {
     return safeOrders.filter((order) => {
-      // Store Type Filter: All vs Local Stores vs Global Stores
-      if (storeTypeFilter !== 'all') {
-        const isGlobal = isOrderGlobal(order);
-        if (storeTypeFilter === 'global' && !isGlobal) return false;
-        if (storeTypeFilter === 'local' && isGlobal) return false;
+      // Unblock filters for "all" and "new" tabs: show all documents from orders collection regardless of branch or orderType
+      if (selectedStatusTab !== 'all' && selectedStatusTab !== 'new') {
+        // Store Type Filter: All vs Local Stores vs Global Stores
+        if (storeTypeFilter !== 'all') {
+          const isGlobal = isOrderGlobal(order);
+          if (storeTypeFilter === 'global' && !isGlobal) return false;
+          if (storeTypeFilter === 'local' && isGlobal) return false;
+        }
       }
 
       // Status filter
       if (selectedStatusTab !== 'all') {
+        const rawStatus = (order.status || '').toLowerCase();
         if (selectedStatusTab === 'pending_review') {
           const isPending = 
-            order.status === 'pending_review' || 
-            order.status === 'PENDING_REVIEW' || 
-            order.status === 'pending' || 
-            order.status === 'PENDING' || 
+            rawStatus === 'pending_review' || 
+            rawStatus === 'pending' || 
             Boolean(order.needsAdminReview);
           if (!isPending) return false;
         } else if (selectedStatusTab === 'new') {
           const isNew = 
-            order.status === 'new' || 
-            order.status === 'NEW' || 
-            order.status === 'pending' || 
-            order.status === 'PENDING' || 
-            order.status === 'pending_review' || 
-            order.status === 'PENDING_REVIEW' || 
+            rawStatus === 'new' || 
+            rawStatus === 'pending' || 
+            rawStatus === 'pending_review' || 
             Boolean(order.needsAdminReview);
           if (!isNew) return false;
         } else if (selectedStatusTab === 'preparing') {
           const isPrep = 
-            order.status === 'preparing' || 
-            order.status === 'PREPARING' || 
-            order.status === 'confirmed' || 
-            order.status === 'CONFIRMED' || 
-            order.status === 'approved' || 
-            order.status === 'APPROVED';
+            rawStatus === 'preparing' || 
+            rawStatus === 'confirmed' || 
+            rawStatus === 'approved';
           if (!isPrep) return false;
+        } else if (selectedStatusTab === 'delivering') {
+          if (rawStatus !== 'delivering') return false;
+        } else if (selectedStatusTab === 'delivered') {
+          if (rawStatus !== 'delivered' && rawStatus !== 'completed') return false;
+        } else if (selectedStatusTab === 'cancelled') {
+          if (rawStatus !== 'cancelled') return false;
+        } else if (selectedStatusTab === 'returned') {
+          if (rawStatus !== 'returned') return false;
         } else if (selectedStatusTab === 'global_stores') {
           const isGlobal = isOrderGlobal(order);
           if (!isGlobal) return false;
-        } else if (order.status !== selectedStatusTab) {
+        } else if (rawStatus !== selectedStatusTab.toLowerCase()) {
           return false;
         }
       }
@@ -621,8 +625,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         const storeMatch = order.storeName?.toLowerCase().includes(term);
         const addressMatch = order.address?.toLowerCase().includes(term);
         const driverMatch = order.driverName?.toLowerCase().includes(term);
+        const branchMatch = order.branch?.toLowerCase().includes(term);
+        const invoiceMatch = order.invoiceNumber?.toLowerCase().includes(term);
         const itemMatch = order.items?.some(i => i.productName.toLowerCase().includes(term));
-        if (!numMatch && !nameMatch && !phoneMatch && !storeMatch && !addressMatch && !driverMatch && !itemMatch) {
+        if (!numMatch && !nameMatch && !phoneMatch && !storeMatch && !addressMatch && !driverMatch && !branchMatch && !invoiceMatch && !itemMatch) {
           return false;
         }
       }
@@ -787,11 +793,30 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     if (!orderToAssign) return;
     try {
       setUpdatingOrderId(orderToAssign.id);
-      await onUpdateOrderStatus(orderToAssign.id, 'preparing', {
+
+      // 1. Direct update to orders/{orderId} in Firestore
+      try {
+        if (!orderToAssign.id.startsWith('local-')) {
+          await updateDoc(doc(db, 'orders', orderToAssign.id), {
+            driverId: driver.id,
+            driverName: driver.name,
+            driverPhone: driver.phone || '',
+            status: "PREPARING",
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (errDb) {
+        console.warn('Direct Firestore driver assign error:', errDb);
+      }
+
+      // 2. Trigger global App callback
+      await onUpdateOrderStatus(orderToAssign.id, 'PREPARING' as any, {
         driverId: driver.id,
         driverName: driver.name,
-        driverPhone: driver.phone
+        driverPhone: driver.phone || '',
+        status: 'PREPARING' as any
       });
+
       setIsAssignDriverModalOpen(false);
       setOrderToAssign(null);
     } catch (err) {
@@ -813,48 +838,61 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
-  // Handler for Driver to save invoice photo & number and receive/deliver order
+  // Handler for Driver to save invoice photo & number and complete order
   const handleSaveInvoiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orderForInvoice || (!invoiceImagePreview && !invoiceInput.trim())) return;
+    if (!orderForInvoice) return;
 
     try {
       setIsSubmittingInvoice(true);
-      const nowIso = new Date().toISOString();
+      const invoiceNumber = invoiceInput.trim() || `INV-${orderForInvoice.orderNumber || orderForInvoice.id.slice(0, 6)}`;
       const finalImage = invoiceImagePreview || 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=800';
       const activeDriverName = orderForInvoice.driverName || selectedDriver?.name || currentUser?.name || 'كابتن التوصيل';
       const activeDriverId = orderForInvoice.driverId || selectedDriver?.id || currentUser?.id || 'drv-gen';
+      const amount = orderForInvoice.total || orderForInvoice.totalPrice || 0;
 
-      // 1. Update Order document with invoice photo details and change status to delivering
-      await onUpdateOrderStatus(orderForInvoice.id, 'delivering', {
-        invoiceNumber: invoiceInput.trim() || `INV-${orderForInvoice.orderNumber || orderForInvoice.id.slice(0, 6)}`,
-        invoiceImageUrl: finalImage,
-        invoiceUploadTime: nowIso,
-        invoiceDriverId: activeDriverId,
-        invoiceDriverName: activeDriverName,
-        receivedByDriverAt: nowIso
-      });
-
-      // 2. Save record in driver_invoices Firestore collection
+      // أ) إنشاء مستند في مجموعة driver_invoices
       try {
         await addDoc(collection(db, 'driver_invoices'), {
           orderId: orderForInvoice.id,
-          orderNumber: orderForInvoice.orderNumber || orderForInvoice.id,
-          orderType: 'regular',
           driverId: activeDriverId,
           driverName: activeDriverName,
-          driverPhone: orderForInvoice.driverPhone || selectedDriver?.phone || '',
-          customerName: orderForInvoice.customerName,
-          storeName: orderForInvoice.storeName || 'المتجر',
+          invoiceNumber: invoiceNumber,
           imageUrl: finalImage,
-          uploadedAt: nowIso,
-          amount: orderForInvoice.total || orderForInvoice.totalPrice || 0,
-          notes: invoiceInput.trim(),
-          createdAt: nowIso
+          amount: amount,
+          createdAt: serverTimestamp(),
+          // حقول إضافية للعرض في لوحة InvoicesManager
+          orderNumber: orderForInvoice.orderNumber || orderForInvoice.id,
+          customerName: orderForInvoice.customerName || '',
+          storeName: orderForInvoice.storeName || '',
+          driverPhone: orderForInvoice.driverPhone || selectedDriver?.phone || '',
+          uploadedAt: new Date().toISOString()
         });
       } catch (errDb) {
         console.warn('Could not save to driver_invoices collection:', errDb);
       }
+
+      // ب) تحديث مستند الطلب في orders إلى status: "COMPLETED", invoiceNumber: invoiceNumber
+      try {
+        if (!orderForInvoice.id.startsWith('local-')) {
+          await updateDoc(doc(db, 'orders', orderForInvoice.id), {
+            status: "COMPLETED",
+            invoiceNumber: invoiceNumber,
+            invoiceImageUrl: finalImage,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (errDb) {
+        console.warn('Direct Firestore order invoice update warning:', errDb);
+      }
+
+      // تحديث حالة الطلب في الواجهة المحلية
+      await onUpdateOrderStatus(orderForInvoice.id, 'COMPLETED' as any, {
+        status: 'COMPLETED' as any,
+        invoiceNumber: invoiceNumber,
+        invoiceImageUrl: finalImage,
+        invoiceUploadTime: new Date().toISOString()
+      });
 
       setIsInvoiceModalOpen(false);
       setOrderForInvoice(null);
@@ -2513,7 +2551,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             <div className="p-4 bg-purple-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-amber-300" />
-                <h3 className="text-sm font-bold">📸 رفع صورة الفاتورة للطلب (بدء التوصيل)</h3>
+                <h3 className="text-sm font-bold">📸 رفع الفاتورة وإنهاء تسليم الطلب</h3>
               </div>
               <button 
                 onClick={() => {
@@ -2531,6 +2569,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-purple-900 space-y-1">
                 <p><span className="text-purple-600 font-bold">الطلب:</span> #{orderForInvoice.orderNumber || orderForInvoice.id.slice(0, 6)} ({orderForInvoice.storeName})</p>
                 <p><span className="text-purple-600 font-bold">العميل:</span> {orderForInvoice.customerName} - {orderForInvoice.customerPhone}</p>
+                <p><span className="text-purple-600 font-bold">المبلغ:</span> {(orderForInvoice.total || orderForInvoice.totalPrice || 0).toLocaleString()} ر.ي</p>
               </div>
 
               {/* Image Upload Widget */}
@@ -2586,13 +2625,13 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
               <div>
                 <label className="font-bold text-slate-800 block mb-1">
-                  ملاحظة أو رقم الفاتورة (اختياري):
+                  رقم الفاتورة المسجل من المتجر:
                 </label>
                 <input 
                   type="text" 
                   value={invoiceInput}
                   onChange={(e) => setInvoiceInput(e.target.value)}
-                  placeholder="مثال: INV-9821 أو تم دفع القيمة كاش"
+                  placeholder="مثال: INV-1002"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-purple-500 bg-white"
                 />
               </div>
@@ -2611,11 +2650,11 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingInvoice || (!invoiceImagePreview && !invoiceInput.trim())}
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2 rounded-xl shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  disabled={isSubmittingInvoice}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded-xl shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer text-xs"
                 >
                   {isSubmittingInvoice ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  <span>رفع الفاتورة وبدء التوصيل 🚀</span>
+                  <span>[ تم تسليم الطلب ]</span>
                 </button>
               </div>
             </form>

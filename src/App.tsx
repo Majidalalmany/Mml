@@ -936,6 +936,21 @@ export default function App() {
           delete updatePayload.password;
         }
         await updateDoc(uRef, updatePayload);
+
+        // Sync to admin_users and admins collections
+        try {
+          await setDoc(doc(db, 'admin_users', editingUser.id), {
+            ...editingUser,
+            ...updatePayload
+          }, { merge: true });
+          await setDoc(doc(db, 'admins', editingUser.id), {
+            ...editingUser,
+            ...updatePayload
+          }, { merge: true });
+        } catch (syncErr) {
+          console.warn('Sync admin user to secondary collections warning:', syncErr);
+        }
+
         showToast(`تم تحديث صلاحيات وعضوية "${userData.name}" بنجاح`);
         await logSystemActivity({
           action: 'تعديل بيانات حساب إداري',
@@ -947,10 +962,27 @@ export default function App() {
           severity: 'info'
         });
       } else {
-        await addDoc(collection(db, 'adminUsers'), {
+        const newDocRef = await addDoc(collection(db, 'adminUsers'), {
           ...userData,
           createdAt: new Date().toISOString()
         });
+
+        // Sync to admin_users and admins collections
+        try {
+          await setDoc(doc(db, 'admin_users', newDocRef.id), {
+            id: newDocRef.id,
+            ...userData,
+            createdAt: new Date().toISOString()
+          });
+          await setDoc(doc(db, 'admins', newDocRef.id), {
+            id: newDocRef.id,
+            ...userData,
+            createdAt: new Date().toISOString()
+          });
+        } catch (syncErr) {
+          console.warn('Sync new admin user to secondary collections warning:', syncErr);
+        }
+
         showToast(`تمت إضافة الموظف "${userData.name}" وتعيين صلاحياته بنجاح`);
         await logSystemActivity({
           action: 'إضافة حساب إداري جديد',

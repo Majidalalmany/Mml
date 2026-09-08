@@ -399,6 +399,7 @@ export interface Order {
   customerPhone?: string;
   storeId?: string;
   storeName?: string;
+  branch?: string;
   total: number;
   totalPrice?: number;
   itemsTotal?: number;
@@ -517,6 +518,7 @@ export interface InvoiceReceipt {
   id: string;
   orderId: string;
   orderNumber: string;
+  invoiceNumber?: string;
   orderType?: 'regular' | 'fazaa' | 'manfaa';
   driverId: string;
   driverName: string;

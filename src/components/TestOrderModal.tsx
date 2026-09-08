@@ -55,8 +55,9 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
   const [customerName, setCustomerName] = useState('أحمد محمد الشامي');
   const [customerPhone, setCustomerPhone] = useState('777123456');
   const [storeName, setStoreName] = useState('مطعم الشيباني الملكي - حدة');
+  const [branch, setBranch] = useState('الفرع الرئيسي - صنعاء');
   const [itemsSummary, setItemsSummary] = useState('وجبة كبسة دجاج عائلي + 2 مقبلات مشكل');
-  const [orderAmount, setOrderAmount] = useState<number>(4500);
+  const [orderAmount, setOrderAmount] = useState<number>(5000);
   
   const [serviceType, setServiceType] = useState<'store' | 'manfaah' | 'international'>('store');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('veh-motorcycle');
@@ -241,14 +242,18 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
 
     const newOrderNumber = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
     
-    const newOrderData: Partial<Order> = {
+    const calculatedTotal = orderAmount || 5000;
+    
+    const newOrderData: Partial<Order> & { branch?: string; totalPrice?: number } = {
       id: `ord_${Date.now()}`,
       orderNumber: newOrderNumber,
-      customerName,
-      customerPhone,
+      customerName: customerName || 'أحمد محمد الشامي',
+      customerPhone: customerPhone || '777123456',
       address: dropoffLocationName,
-      storeName,
-      total: orderAmount + pricingResult.finalDeliveryFee,
+      storeName: storeName || 'مطعم الشيباني الملكي - حدة',
+      branch: branch || 'الفرع الرئيسي - صنعاء',
+      total: calculatedTotal,
+      totalPrice: calculatedTotal,
       itemsTotal: orderAmount,
       deliveryFee: pricingResult.finalDeliveryFee,
       status: 'new',

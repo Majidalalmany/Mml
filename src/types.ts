@@ -241,6 +241,13 @@ export interface QualityReview {
 }
 
 export type OrderStatus = 
+  | 'new'
+  | 'preparing'
+  | 'delivering'
+  | 'completed'
+  | 'cancelled'
+  | 'delivered'
+  | 'returned'
   | 'PENDING_REVIEW'
   | 'pending_review'
   | 'PENDING'
@@ -253,13 +260,7 @@ export type OrderStatus =
   | 'PREPARING'
   | 'DELIVERING'
   | 'COMPLETED'
-  | 'CANCELLED'
-  | 'new'
-  | 'preparing'
-  | 'delivering'
-  | 'delivered'
-  | 'cancelled'
-  | 'returned';
+  | 'CANCELLED';
 
 export interface VehicleType {
   id: string;

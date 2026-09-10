@@ -713,25 +713,30 @@ export default function App() {
   // Orders CRUD Handlers
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => {
     const statusLabel = ORDER_STATUS_LABELS[newStatus] || newStatus;
-    try {
-      if (!orderId.startsWith('local-')) {
+    const nowIso = new Date().toISOString();
+    
+    // 1. First persist strictly to Firestore
+    if (!orderId.startsWith('local-')) {
+      try {
         const orderRef = doc(db, 'orders', orderId);
         const updatePayload: any = {
           status: newStatus,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso,
           ...(extraData || {})
         };
         await updateDoc(orderRef, updatePayload);
+      } catch (err: any) {
+        console.error('CRITICAL: Firestore updateDoc failed for order:', orderId, err);
+        showToast(`فشل حفظ التحديث في قاعدة البيانات: ${err?.message || 'خطأ غير معروف'}`);
+        throw err; // Re-throw to inform caller that DB update failed
       }
-    } catch (err: any) {
-      console.warn('Firestore updateDoc warning, fallback to local sync:', err);
     }
 
-    // Update in-memory orders state
+    // 2. Update in-memory orders state only after DB persistence succeeds
     setOrders(prev => prev.map(o => (o.id === orderId || o.orderNumber === orderId) ? {
       ...o,
       status: newStatus,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
       ...(extraData || {})
     } : o));
 

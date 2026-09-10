@@ -2,25 +2,27 @@ import { OrderStatus } from '../types';
 import { Clock, Utensils, Truck, CheckCircle2, XCircle, RotateCcw, ClipboardCheck, CheckCheck } from 'lucide-react';
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  PENDING_REVIEW: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
-  pending_review: 'قيد مراجعة الإدارة وتحديد وسيلة النقل',
-  PENDING: 'قيد المراجعة والتأكيد',
-  pending: 'قيد المراجعة والتأكيد',
-  CONFIRMED: 'تم التأكيد هاتفياً (بانتظار التحضير)',
-  confirmed: 'تم التأكيد هاتفياً (بانتظار التحضير)',
-  APPROVED: 'تمت الموافقة وتأكيد تكلفة التوصيل',
-  approved: 'تمت الموافقة وتأكيد تكلفة التوصيل',
-  NEW: 'طلب جديد',
-  PREPARING: 'قيد التحضير والتجهيز',
-  DELIVERING: 'قيد التوصيل مع الكابتن',
-  COMPLETED: 'تم الاستلام (مكتمل)',
-  CANCELLED: 'تم الإلغاء',
-  new: 'طلب جديد',
+  new: 'جديد',
   preparing: 'قيد التحضير',
   delivering: 'قيد التوصيل',
-  delivered: 'مكتمل / تم التسليم',
-  cancelled: 'تم الإلغاء',
-  returned: 'تم الإرجاع',
+  completed: 'مكتمل',
+  cancelled: 'ملغي',
+  // Backwards compatibility mappings for uppercase/legacy values
+  NEW: 'جديد',
+  PREPARING: 'قيد التحضير',
+  DELIVERING: 'قيد التوصيل',
+  COMPLETED: 'مكتمل',
+  CANCELLED: 'ملغي',
+  delivered: 'مكتمل',
+  confirmed: 'قيد التحضير',
+  CONFIRMED: 'قيد التحضير',
+  approved: 'قيد التحضير',
+  APPROVED: 'قيد التحضير',
+  pending: 'جديد',
+  PENDING: 'جديد',
+  pending_review: 'جديد',
+  PENDING_REVIEW: 'جديد',
+  returned: 'ملغي',
 };
 
 export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
@@ -158,6 +160,14 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
     iconColor: 'text-purple-600',
     borderColor: 'border-purple-300',
     Icon: Truck
+  },
+  completed: {
+    label: 'مكتمل / تم التسليم',
+    badgeClass: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-emerald-600',
+    borderColor: 'border-emerald-300',
+    Icon: CheckCircle2
   },
   delivered: {
     label: 'مكتمل / تم التسليم',

@@ -711,9 +711,26 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
     try {
       setUpdatingOrderId(orderId);
+      const nowIso = new Date().toISOString();
+
+      // 1. Direct Firestore update strictly awaited
+      if (!orderId.startsWith('local-')) {
+        await updateDoc(doc(db, 'orders', orderId), {
+          status: newStatus,
+          updatedAt: nowIso
+        });
+      }
+
+      // 2. Global handler and local state sync
       await onUpdateOrderStatus(orderId, newStatus);
-    } catch (err) {
+      setLiveOrders(prev => prev.map(o => o.id === orderId ? {
+        ...o,
+        status: newStatus,
+        updatedAt: nowIso
+      } : o));
+    } catch (err: any) {
       console.error('Failed updating order status:', err);
+      alert(`فشل تحديث حالة الطلب في قاعدة البيانات: ${err?.message || 'يرجى المحاولة مجدداً'}`);
     } finally {
       setUpdatingOrderId(null);
     }
@@ -726,8 +743,22 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       setUpdatingOrderId(order.id);
       const nowIso = new Date().toISOString();
       const adminName = currentUser?.name || 'مدير النظام';
-      await onUpdateOrderStatus(order.id, 'confirmed', {
-        status: 'confirmed',
+
+      // 1. Direct Firestore update strictly awaited with status "preparing" (or confirmed)
+      if (!order.id.startsWith('local-')) {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'preparing',
+          needsAdminReview: false,
+          confirmedByAdminAt: nowIso,
+          confirmedByAdminName: adminName,
+          adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`,
+          updatedAt: nowIso
+        });
+      }
+
+      // 2. Global state and local sync
+      await onUpdateOrderStatus(order.id, 'preparing', {
+        status: 'preparing',
         needsAdminReview: false,
         confirmedByAdminAt: nowIso,
         confirmedByAdminName: adminName,
@@ -737,14 +768,14 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       // Update local state directly
       setLiveOrders(prev => prev.map(o => o.id === order.id ? {
         ...o,
-        status: 'confirmed',
+        status: 'preparing',
         needsAdminReview: false,
         confirmedByAdminAt: nowIso,
         confirmedByAdminName: adminName
       } : o));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed confirming order after call:', err);
-      alert('حدث خطأ أثناء تأكيد الطلب، يرجى المحاولة مرة أخرى.');
+      alert(`حدث خطأ أثناء تأكيد الطلب وحفظه في السيرفر: ${err?.message || 'يرجى المحاولة مرة أخرى'}`);
     } finally {
       setUpdatingOrderId(null);
     }
@@ -762,8 +793,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       setUpdatingOrderId(order.id);
       const nowIso = new Date().toISOString();
       const adminName = currentUser?.name || 'مدير النظام';
-      await onUpdateOrderStatus(order.id, 'confirmed', {
-        status: 'confirmed',
+
+      // 1. Direct Firestore update strictly awaited
+      if (!order.id.startsWith('local-')) {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'preparing',
+          total: finalPrice,
+          totalPrice: finalPrice,
+          needsAdminReview: false,
+          confirmedByAdminAt: nowIso,
+          confirmedByAdminName: adminName,
+          adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`,
+          updatedAt: nowIso
+        });
+      }
+
+      // 2. Global state and local sync
+      await onUpdateOrderStatus(order.id, 'preparing', {
+        status: 'preparing',
         total: finalPrice,
         totalPrice: finalPrice,
         needsAdminReview: false,
@@ -774,16 +821,16 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       setLiveOrders(prev => prev.map(o => o.id === order.id ? {
         ...o,
-        status: 'confirmed',
+        status: 'preparing',
         total: finalPrice,
         totalPrice: finalPrice,
         needsAdminReview: false,
         confirmedByAdminAt: nowIso,
         confirmedByAdminName: adminName
       } : o));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed confirming global order:', err);
-      alert('حدث خطأ أثناء تأكيد الطلب، يرجى المحاولة مرة أخرى.');
+      alert(`حدث خطأ أثناء تأكيد الطلب وحفظه في السيرفر: ${err?.message || 'يرجى المحاولة مرة أخرى'}`);
     } finally {
       setUpdatingOrderId(null);
     }
@@ -799,18 +846,14 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       const targetDriverName = (driver.name || '').trim();
 
       // 1. Direct update to orders/{orderId} in Firestore exactly as expected by driver app
-      try {
-        if (!orderToAssign.id.startsWith('local-')) {
-          await updateDoc(doc(db, 'orders', orderToAssign.id), {
-            driverId: targetDriverPhone, // إجبار استخدام رقم الهاتف كمعرف صريح
-            driverName: targetDriverName,
-            driverPhone: targetDriverPhone,
-            status: "PREPARING", // إجبار الحالة على PREPARING بأحرف كبيرة
-            updatedAt: new Date().toISOString()
-          });
-        }
-      } catch (errDb) {
-        console.warn('Direct Firestore driver assign error:', errDb);
+      if (!orderToAssign.id.startsWith('local-')) {
+        await updateDoc(doc(db, 'orders', orderToAssign.id), {
+          driverId: targetDriverPhone, // إجبار استخدام رقم الهاتف كمعرف صريح
+          driverName: targetDriverName,
+          driverPhone: targetDriverPhone,
+          status: "PREPARING", // إجبار الحالة على PREPARING بأحرف كبيرة
+          updatedAt: new Date().toISOString()
+        });
       }
 
       // 2. Trigger global App callback
@@ -821,10 +864,20 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         status: 'PREPARING' as any
       });
 
+      // Update local state directly
+      setLiveOrders(prev => prev.map(o => o.id === orderToAssign.id ? {
+        ...o,
+        driverId: targetDriverPhone,
+        driverName: targetDriverName,
+        driverPhone: targetDriverPhone,
+        status: 'PREPARING' as any
+      } : o));
+
       setIsAssignDriverModalOpen(false);
       setOrderToAssign(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed assigning driver:', err);
+      alert(`فشل إسناد المندوب وحفظ الطلب في السيرفر: ${err?.message || 'يرجى المحاولة مجدداً'}`);
     } finally {
       setUpdatingOrderId(null);
     }
@@ -1343,19 +1396,28 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                         {canEditOrders ? (
                           <div className="flex items-center gap-1.5">
                             <select
-                              value={rawStatus}
+                              value={
+                                rawStatus === 'NEW' || rawStatus === 'pending' || rawStatus === 'pending_review' || rawStatus === 'PENDING' || rawStatus === 'PENDING_REVIEW'
+                                  ? 'new'
+                                  : rawStatus === 'PREPARING' || rawStatus === 'confirmed' || rawStatus === 'CONFIRMED' || rawStatus === 'approved' || rawStatus === 'APPROVED'
+                                  ? 'preparing'
+                                  : rawStatus === 'DELIVERING'
+                                  ? 'delivering'
+                                  : rawStatus === 'COMPLETED' || rawStatus === 'delivered'
+                                  ? 'completed'
+                                  : rawStatus === 'CANCELLED' || rawStatus === 'returned'
+                                  ? 'cancelled'
+                                  : rawStatus
+                              }
                               disabled={updatingOrderId === order.id}
                               onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
                               className={`text-xs font-bold px-3 py-1.5 rounded-xl border cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs transition-all ${statusConfig.badgeClass}`}
                             >
-                              <option value="new">🟡 جديد (بانتظار التأكيد)</option>
-                              <option value="pending">🟠 قيد المراجعة والتدقيق</option>
-                              <option value="confirmed">🟢 تم التأكيد هاتفياً</option>
-                              <option value="preparing">🔵 قيد التحضير (تحديد مندوب)</option>
+                              <option value="new">🟡 جديد</option>
+                              <option value="preparing">🔵 قيد التحضير (إسناد للمندوب)</option>
                               <option value="delivering">🟣 قيد التوصيل</option>
-                              <option value="delivered">🟢 مكتمل / تم التسليم</option>
-                              {canCancelOrders && <option value="cancelled">🔴 إلغاء عبر الإدارة</option>}
-                              <option value="returned">⚪ تم الإرجاع</option>
+                              <option value="completed">🟢 مكتمل</option>
+                              {canCancelOrders && <option value="cancelled">🔴 ملغي</option>}
                             </select>
                             {updatingOrderId === order.id && (
                               <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
@@ -2014,17 +2076,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                         <div className="grid grid-cols-2 gap-2">
                           {/* Delivering Button */}
                           <button
-                            disabled={!canDeliver || order.status === 'delivering' || order.status === 'delivered'}
+                            disabled={!canDeliver || order.status === 'delivering' || order.status === 'delivered' || order.status === 'completed' || order.status === 'COMPLETED'}
                             onClick={async () => {
                               try {
                                 setUpdatingOrderId(order.id);
+                                if (!order.id.startsWith('local-')) {
+                                  await updateDoc(doc(db, 'orders', order.id), {
+                                    status: 'delivering',
+                                    updatedAt: new Date().toISOString()
+                                  });
+                                }
                                 await onUpdateOrderStatus(order.id, 'delivering');
+                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'delivering' } : o));
                               } finally {
                                 setUpdatingOrderId(null);
                               }
                             }}
                             className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                              canDeliver && order.status !== 'delivering' && order.status !== 'delivered'
+                              canDeliver && order.status !== 'delivering' && order.status !== 'delivered' && order.status !== 'completed' && order.status !== 'COMPLETED'
                                 ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs cursor-pointer'
                                 : order.status === 'delivering'
                                 ? 'bg-purple-100 text-purple-900 border border-purple-300 font-extrabold'
@@ -2048,7 +2117,14 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                             onClick={async () => {
                               try {
                                 setUpdatingOrderId(order.id);
-                                await onUpdateOrderStatus(order.id, 'delivered');
+                                if (!order.id.startsWith('local-')) {
+                                  await updateDoc(doc(db, 'orders', order.id), {
+                                    status: 'completed',
+                                    updatedAt: new Date().toISOString()
+                                  });
+                                }
+                                await onUpdateOrderStatus(order.id, 'completed');
+                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'completed' } : o));
                               } finally {
                                 setUpdatingOrderId(null);
                               }
@@ -2056,14 +2132,14 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                             className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                               order.status === 'delivering'
                                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer'
-                                : order.status === 'delivered'
+                                : (order.status === 'delivered' || order.status === 'completed' || order.status === 'COMPLETED')
                                 ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 font-extrabold'
                                 : 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300'
                             }`}
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>
-                              {order.status === 'delivered' ? 'تم التسليم بنجاح ✅' : 'تأكيد التسليم للعميل'}
+                              {(order.status === 'delivered' || order.status === 'completed' || order.status === 'COMPLETED') ? 'تم التسليم بنجاح ✅' : 'تأكيد التسليم للعميل'}
                             </span>
                           </button>
                         </div>

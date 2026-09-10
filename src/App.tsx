@@ -413,14 +413,24 @@ export default function App() {
             fetch('/api/users')
               .then(res => res.json())
               .then(data => { if (data.users) setAppUsers(data.users); })
-              .catch(err => console.warn('App users API error:', err));
+              .catch(() => {});
           }
           setIsLoadingAppUsers(false);
-        }, () => setIsLoadingAppUsers(false));
+        }, () => {
+          fetch('/api/users')
+            .then(res => res.json())
+            .then(data => { if (data.users) setAppUsers(data.users); })
+            .catch(() => {})
+            .finally(() => setIsLoadingAppUsers(false));
+        });
       }
-    }, (err) => {
-      console.warn('Clients listener fallback:', err);
-      setIsLoadingAppUsers(false);
+    }, () => {
+      // Graceful fallback to backend API on permission or read issues without blocking app state
+      fetch('/api/users')
+        .then(res => res.json())
+        .then(data => { if (data.users) setAppUsers(data.users); })
+        .catch(() => {})
+        .finally(() => setIsLoadingAppUsers(false));
     });
 
     return () => unsubscribeClients();

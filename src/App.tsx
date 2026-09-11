@@ -405,23 +405,25 @@ export default function App() {
       } else {
         // Fallback check on app_users
         const legacyQuery = query(collection(db, 'app_users'));
-        onSnapshot(legacyQuery, (legSnap) => {
-          const legList: AppUser[] = legSnap.docs.map(d => ({ id: d.id, ...d.data() })) as AppUser[];
-          if (legList.length > 0) {
-            setAppUsers(legList);
-          } else {
+        import('./lib/firebase').then(({ getDocs }) => {
+          getDocs(legacyQuery).then((legSnap) => {
+            const legList = legSnap.docs.map(d => ({ id: d.id, ...d.data() })) as AppUser[];
+            if (legList.length > 0) {
+              setAppUsers(legList);
+            } else {
+              fetch('/api/users')
+                .then(res => res.json())
+                .then(data => { if (data.users) setAppUsers(data.users); })
+                .catch(() => {});
+            }
+            setIsLoadingAppUsers(false);
+          }).catch(() => {
             fetch('/api/users')
               .then(res => res.json())
               .then(data => { if (data.users) setAppUsers(data.users); })
-              .catch(() => {});
-          }
-          setIsLoadingAppUsers(false);
-        }, () => {
-          fetch('/api/users')
-            .then(res => res.json())
-            .then(data => { if (data.users) setAppUsers(data.users); })
-            .catch(() => {})
-            .finally(() => setIsLoadingAppUsers(false));
+              .catch(() => {})
+              .finally(() => setIsLoadingAppUsers(false));
+          });
         });
       }
     }, () => {
@@ -485,11 +487,11 @@ export default function App() {
       });
 
       try {
-        await updateDoc(doc(db, 'fazaa_orders', orderId), {
+        await setDoc(doc(db, 'fazaa_orders', orderId), {
           status,
           ...(driverName !== undefined ? { driverName, driverPhone } : {}),
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
       } catch (e) {
         console.warn('Firestore updateDoc fallback:', e);
       }
@@ -724,7 +726,7 @@ export default function App() {
           updatedAt: nowIso,
           ...(extraData || {})
         };
-        await updateDoc(orderRef, updatePayload);
+        await setDoc(orderRef, updatePayload, { merge: true });
       } catch (err: any) {
         console.error('CRITICAL: Firestore updateDoc failed for order:', orderId, err);
         showToast(`فشل حفظ التحديث في قاعدة البيانات: ${err?.message || 'خطأ غير معروف'}`);

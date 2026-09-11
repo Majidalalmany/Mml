@@ -105,7 +105,15 @@ export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
 
   const canEdit = hasModulePermission(currentUser, 'delivery', 'edit');
 
-  const safeOrders = orders || [];
+  const safeOrders = useMemo(() => {
+    const raw = orders || [];
+    const uniqueMap = new Map();
+    raw.forEach(o => {
+      if (o.id) uniqueMap.set(o.id, o);
+      else if (o.orderNumber) uniqueMap.set(o.orderNumber, o);
+    });
+    return Array.from(uniqueMap.values());
+  }, [orders]);
   const safeCategories = categories || [];
 
   // Default Categories if empty

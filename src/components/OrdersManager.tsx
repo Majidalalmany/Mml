@@ -46,7 +46,7 @@ import { Order, OrderStatus, Store, Category, AdminUser, DriverUser, VehicleType
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
 import { INITIAL_CATEGORIES } from '../services/seedData';
-import { db, collection, addDoc, onSnapshot, query, doc, updateDoc, serverTimestamp } from '../lib/firebase';
+import { db, collection, addDoc, onSnapshot, query, doc, updateDoc, setDoc, serverTimestamp } from '../lib/firebase';
 import { 
   getLocalVehicles, 
   findVehicleType, 
@@ -290,10 +290,12 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [liveOrders, setLiveOrders] = useState<Order[]>(orders);
 
   useEffect(() => {
+    let unsubscribe: any;
     try {
       // 1. Initial & Periodical API sync (to fetch orders placed via Mobile Client REST API)
       const fetchApiOrders = async () => {
-        try {
+        let unsubscribe: any;
+    try {
           const res = await fetch('/api/orders');
           if (res.ok) {
             const data = await res.json();
@@ -313,7 +315,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       fetchApiOrders();
 
       const ordersQuery = query(collection(db, 'orders'));
-      const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+      unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
         const list: Order[] = snapshot.docs.map(docSnap => {
           const data = docSnap.data();
           const isGlobal = Boolean(
@@ -401,27 +403,27 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         console.warn('Orders onSnapshot error in OrdersManager:', err);
       });
 
-      // Window event listener for immediately placed orders
-      const handleOrderPlaced = (e: any) => {
-        const newOrder = e.detail?.order;
-        if (newOrder) {
-          setLiveOrders(prev => {
-            if (prev.some(o => o.id === newOrder.id || o.orderNumber === newOrder.orderNumber)) {
-              return prev;
-            }
-            return [newOrder, ...prev];
-          });
-        }
-      };
-      window.addEventListener('jahez_order_placed', handleOrderPlaced);
-
-      return () => {
-        unsubscribe();
-        window.removeEventListener('jahez_order_placed', handleOrderPlaced);
-      };
     } catch (e) {
       console.warn('Orders listener setup error in OrdersManager:', e);
     }
+
+    // Window event listener for immediately placed orders
+    const handleOrderPlaced = (e: any) => {
+      const newOrder = e.detail?.order;
+      if (newOrder) {
+        setLiveOrders(prev => {
+          if (prev.some(o => o.id === newOrder.id || o.orderNumber === newOrder.orderNumber)) {
+            return prev;
+          }
+          return [newOrder, ...prev];
+        });
+      }
+    };
+    window.addEventListener('jahez_order_placed', handleOrderPlaced);
+    return () => {
+      if (unsubscribe) unsubscribe();
+      window.removeEventListener('jahez_order_placed', handleOrderPlaced);
+    };
   }, []);
 
   // Sync prop changes when passed from App
@@ -431,7 +433,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   }, [orders]);
 
-  const safeOrders = liveOrders.length > 0 ? liveOrders : (orders || []);
+  const safeOrders = useMemo(() => {
+    const raw = liveOrders.length > 0 ? liveOrders : (orders || []);
+    const uniqueMap = new Map();
+    raw.forEach(o => {
+      if (o.id) uniqueMap.set(o.id, o);
+      else if (o.orderNumber) uniqueMap.set(o.orderNumber, o);
+    });
+    return Array.from(uniqueMap.values());
+  }, [liveOrders, orders]);
   const safeStores = useMemo(() => getUnifiedStores(stores || []), [stores]);
   const safeCategories = useMemo(() => {
     const merged = [...(categories || [])];
@@ -494,16 +504,16 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
   // Firestore Realtime Drivers Listener
   useEffect(() => {
+    let unsubscribe: any;
     try {
       const driversQuery = query(collection(db, 'drivers'));
-      const unsubscribe = onSnapshot(driversQuery, (snapshot) => {
+      unsubscribe = onSnapshot(driversQuery, (snapshot) => {
         const fetchedList: DriverUser[] = snapshot.docs.map(docSnap => ({
           id: docSnap.id,
           ...docSnap.data()
         })) as DriverUser[];
 
         if (fetchedList.length > 0) {
-          // Merge fetched with defaults to ensure complete list
           const combined = [...fetchedList];
           DEFAULT_DRIVERS.forEach(defDrv => {
             if (!combined.some(d => d.id === defDrv.id || d.phone === defDrv.phone)) {
@@ -518,15 +528,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         console.warn('Drivers listener fallback:', err);
         setDrivers(DEFAULT_DRIVERS);
       });
-
-      return () => unsubscribe();
     } catch (e) {
       setDrivers(DEFAULT_DRIVERS);
     }
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   // Filtered orders for Admin View
   const filteredOrders = useMemo(() => {
+    const allIds = safeOrders.map(o => o.id);
+    const duplicates = allIds.filter((item, index) => allIds.indexOf(item) !== index);
+    if (duplicates.length > 0) console.error('DUPLICATES IN SAFEORDERS:', duplicates);
+
     return safeOrders.filter((order) => {
       // Unblock filters for "all" and "new" tabs: show all documents from orders collection regardless of branch or orderType
       if (selectedStatusTab !== 'all' && selectedStatusTab !== 'new') {
@@ -715,10 +731,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited
       if (!orderId.startsWith('local-')) {
-        await updateDoc(doc(db, 'orders', orderId), {
+        await setDoc(doc(db, 'orders', orderId), {
           status: newStatus,
           updatedAt: nowIso
-        });
+        }, { merge: true });
       }
 
       // 2. Global handler and local state sync
@@ -746,14 +762,14 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited with status "preparing" (or confirmed)
       if (!order.id.startsWith('local-')) {
-        await updateDoc(doc(db, 'orders', order.id), {
+        await setDoc(doc(db, 'orders', order.id), {
           status: 'preparing',
           needsAdminReview: false,
           confirmedByAdminAt: nowIso,
           confirmedByAdminName: adminName,
           adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`,
           updatedAt: nowIso
-        });
+        }, { merge: true });
       }
 
       // 2. Global state and local sync
@@ -796,7 +812,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited
       if (!order.id.startsWith('local-')) {
-        await updateDoc(doc(db, 'orders', order.id), {
+        await setDoc(doc(db, 'orders', order.id), {
           status: 'preparing',
           total: finalPrice,
           totalPrice: finalPrice,
@@ -805,7 +821,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           confirmedByAdminName: adminName,
           adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`,
           updatedAt: nowIso
-        });
+        }, { merge: true });
       }
 
       // 2. Global state and local sync
@@ -847,21 +863,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct update to orders/{orderId} in Firestore exactly as expected by driver app
       if (!orderToAssign.id.startsWith('local-')) {
-        await updateDoc(doc(db, 'orders', orderToAssign.id), {
+        await setDoc(doc(db, 'orders', orderToAssign.id), {
           driverId: targetDriverPhone, // إجبار استخدام رقم الهاتف كمعرف صريح
           driverName: targetDriverName,
           driverPhone: targetDriverPhone,
-          status: "PREPARING", // إجبار الحالة على PREPARING بأحرف كبيرة
+          status: 'preparing',
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
       }
 
       // 2. Trigger global App callback
-      await onUpdateOrderStatus(orderToAssign.id, 'PREPARING' as any, {
+      await onUpdateOrderStatus(orderToAssign.id, 'preparing', {
         driverId: targetDriverPhone,
         driverName: targetDriverName,
         driverPhone: targetDriverPhone,
-        status: 'PREPARING' as any
+        status: 'preparing'
       });
 
       // Update local state directly
@@ -870,7 +886,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         driverId: targetDriverPhone,
         driverName: targetDriverName,
         driverPhone: targetDriverPhone,
-        status: 'PREPARING' as any
+        status: 'preparing'
       } : o));
 
       setIsAssignDriverModalOpen(false);
@@ -932,12 +948,12 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       // ب) تحديث مستند الطلب في orders إلى status: "COMPLETED", invoiceNumber: invoiceNumber
       try {
         if (!orderForInvoice.id.startsWith('local-')) {
-          await updateDoc(doc(db, 'orders', orderForInvoice.id), {
+          await setDoc(doc(db, 'orders', orderForInvoice.id), {
             status: "COMPLETED",
             invoiceNumber: invoiceNumber,
             invoiceImageUrl: finalImage,
             updatedAt: new Date().toISOString()
-          });
+          }, { merge: true });
         }
       } catch (errDb) {
         console.warn('Direct Firestore order invoice update warning:', errDb);
@@ -2081,10 +2097,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                               try {
                                 setUpdatingOrderId(order.id);
                                 if (!order.id.startsWith('local-')) {
-                                  await updateDoc(doc(db, 'orders', order.id), {
+                                  await setDoc(doc(db, 'orders', order.id), {
                                     status: 'delivering',
                                     updatedAt: new Date().toISOString()
-                                  });
+                                  }, { merge: true });
                                 }
                                 await onUpdateOrderStatus(order.id, 'delivering');
                                 setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'delivering' } : o));
@@ -2118,10 +2134,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                               try {
                                 setUpdatingOrderId(order.id);
                                 if (!order.id.startsWith('local-')) {
-                                  await updateDoc(doc(db, 'orders', order.id), {
+                                  await setDoc(doc(db, 'orders', order.id), {
                                     status: 'completed',
                                     updatedAt: new Date().toISOString()
-                                  });
+                                  }, { merge: true });
                                 }
                                 await onUpdateOrderStatus(order.id, 'completed');
                                 setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'completed' } : o));

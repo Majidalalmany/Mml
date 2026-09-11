@@ -361,7 +361,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   const [drivers, setDrivers] = useState<DriverUser[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'available' | 'online' | 'busy' | 'offline' | 'all'>('available');
+  const [statusFilter, setStatusFilter] = useState<'available' | 'online' | 'busy' | 'offline' | 'all'>('all');
   const [lastFirestoreSyncTime, setLastFirestoreSyncTime] = useState<string | null>(null);
   
   // Selection & Modal States

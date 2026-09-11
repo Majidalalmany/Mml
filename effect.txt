@@ -1,0 +1,243 @@
+  useEffect(() => {
+    try {
+      // 1. Initial & Periodical API sync (to fetch orders placed via Mobile Client REST API)
+      const fetchApiOrders = async () => {
+        try {
+          const res = await fetch('/api/orders');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.orders && Array.isArray(data.orders)) {
+              setLiveOrders(prev => {
+                const map = new Map<string, Order>();
+                prev.forEach(o => map.set(o.id || o.orderNumber, o));
+                data.orders.forEach((o: Order) => map.set(o.id || o.orderNumber, o));
+                return Array.from(map.values());
+              });
+            }
+          }
+        } catch {
+          // Offline mode / silent
+        }
+      };
+      fetchApiOrders();
+
+      const ordersQuery = query(collection(db, 'orders'));
+      const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+        const list: Order[] = snapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          const isGlobal = Boolean(
+            data.orderType === 'global_store' ||
+            data.orderType?.includes?.('global_store') ||
+            data.orderType?.includes?.('متجر عالمي') ||
+            data.orderScope === 'international' ||
+            data.orderScope === 'global' ||
+            data.serviceType === 'global_store' ||
+            data.serviceType === 'global' ||
+            data.isGlobalStore ||
+            data.categoryId === 'global_stores' ||
+            data.categoryId === 'cat-global' ||
+            data.categoryId === 'global' ||
+            data.categoryName === 'المتاجر العالمية' ||
+            data.categoryName?.includes?.('عالمي') ||
+            data.storeCategory === 'المتاجر العالمية' ||
+            data.storeCategory?.includes?.('عالمي') ||
+            data.storeId === 'amazon' ||
+            data.storeId === 'global-store-amazon' ||
+            data.storeId === 'shein' ||
+            data.storeId === 'global-store-shein' ||
+            data.storeId === 'aliexpress' ||
+            data.storeId === 'global-store-aliexpress' ||
+            data.storeName?.includes?.('أمازون') ||
+            data.storeName?.includes?.('Amazon') ||
+            data.storeName?.includes?.('SHEIN') ||
+            data.storeName?.includes?.('شي إن') ||
+            data.storeName?.includes?.('AliExpress') ||
+            data.storeName?.includes?.('علي إكسبريس') ||
+            data.storeName?.includes?.('المتاجر العالمية') ||
+            (data.items && data.items.some?.((it: any) => 
+              it.productUrl || 
+              it.sourceUrl || 
+              it.url ||
+              it.isGlobal || 
+              it.storeName?.includes?.('أمازون') || 
+              it.storeName?.includes?.('Amazon') || 
+              it.storeName?.includes?.('AliExpress') || 
+              it.storeName?.includes?.('شي إن') ||
+              it.storeName?.includes?.('SHEIN')
+            ))
+          );
+
+          let storeName = data.storeName || (data.items?.[0]?.storeName);
+          if (!storeName || storeName === 'متجر عام') {
+            storeName = isGlobal ? 'المتاجر العالمية' : 'متجر عام';
+          }
+
+          return {
+            id: docSnap.id,
+            orderNumber: data.orderNumber || `ORD-${docSnap.id.substring(0, 5)}`,
+            customerName: data.customerName || data.userName || 'عميل',
+            customerPhone: data.customerPhone || data.phone || '',
+            address: data.deliveryAddress || data.address || data.dropoffAddress || '',
+            storeId: data.storeId || (isGlobal ? 'global-store-amazon' : ''),
+            storeName,
+            categoryId: data.categoryId || (isGlobal ? 'global_stores' : ''),
+            categoryName: data.categoryName || (isGlobal ? 'المتاجر العالمية' : ''),
+            storeCategory: data.storeCategory || (isGlobal ? 'المتاجر العالمية' : ''),
+            isGlobalStore: isGlobal || Boolean(data.isGlobalStore),
+            total: data.total || data.totalPrice || data.orderTotal || 0,
+            itemsTotal: data.itemsTotal || data.subtotal || data.itemsPrice || 0,
+            deliveryFee: data.deliveryFee || data.shippingFee || 0,
+            status: (data.status || 'pending') as OrderStatus,
+            needsAdminReview: Boolean(
+              data.needsAdminReview || 
+              data.status === 'pending_review' || 
+              data.status === 'pending' || 
+              data.status === 'PENDING_REVIEW' || 
+              data.status === 'PENDING'
+            ),
+            itemsCount: data.itemsCount || (data.items ? data.items.length : 1),
+            items: data.items || [],
+            paymentMethod: data.paymentMethod || 'cash',
+            paymentStatus: data.paymentStatus || 'pending',
+            createdAt: data.createdAt ? (typeof data.createdAt === 'string' ? data.createdAt : data.createdAt.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+            ...data
+          } as Order;
+        });
+
+        // Set live orders directly from Firestore snapshot without stale localStorage
+        setLiveOrders(list);
+      }, (err) => {
+        console.warn('Orders onSnapshot error in OrdersManager:', err);
+      });
+
+      // Window event listener for immediately placed orders
+      const handleOrderPlaced = (e: any) => {
+        const newOrder = e.detail?.order;
+        if (newOrder) {
+          setLiveOrders(prev => {
+            if (prev.some(o => o.id === newOrder.id || o.orderNumber === newOrder.orderNumber)) {
+              return prev;
+            }
+            return [newOrder, ...prev];
+          });
+        }
+      };
+      window.addEventListener('jahez_order_placed', handleOrderPlaced);
+
+      return () => {
+        unsubscribe();
+        window.removeEventListener('jahez_order_placed', handleOrderPlaced);
+      };
+    } catch (e) {
+      console.warn('Orders listener setup error in OrdersManager:', e);
+    }
+  }, []);
+  useEffect(() => {
+    if (orders) {
+      setLiveOrders(orders);
+    }
+  }, [orders]);
+
+  const safeOrders = useMemo(() => {
+    const raw = liveOrders.length > 0 ? liveOrders : (orders || []);
+    const uniqueMap = new Map();
+    raw.forEach(o => {
+      if (o.id) uniqueMap.set(o.id, o);
+      else if (o.orderNumber) uniqueMap.set(o.orderNumber, o);
+    });
+    return Array.from(uniqueMap.values());
+  }, [liveOrders, orders]);
+  const safeStores = useMemo(() => getUnifiedStores(stores || []), [stores]);
+  const safeCategories = useMemo(() => {
+    const merged = [...(categories || [])];
+    INITIAL_CATEGORIES.forEach(initCat => {
+      if (!merged.some(c => c.id === initCat.id || c.name === initCat.name)) {
+        merged.push(initCat as any);
+      }
+    });
+    return merged;
+  }, [categories]);
+
+  const isOrderGlobal = (order: Order) => Boolean(
+    order.orderType === 'global_store' ||
+    order.orderType?.includes('global_store') ||
+    order.orderType?.includes('متجر عالمي') ||
+    order.orderScope === 'international' ||
+    order.orderScope === 'global' ||
+    order.serviceType === 'global_store' ||
+    order.serviceType === 'global' ||
+    order.isGlobalStore ||
+    order.categoryId === 'global_stores' ||
+    order.categoryId === 'cat-global' ||
+    order.categoryId === 'global' ||
+    order.categoryName === 'المتاجر العالمية' ||
+    order.categoryName?.includes('عالمي') ||
+    order.storeCategory === 'المتاجر العالمية' ||
+    order.storeCategory?.includes('عالمي') ||
+    order.storeId === 'amazon' ||
+    order.storeId === 'global-store-amazon' ||
+    order.storeId === 'shein' ||
+    order.storeId === 'global-store-shein' ||
+    order.storeId === 'aliexpress' ||
+    order.storeId === 'global-store-aliexpress' ||
+    order.storeName?.includes('أمازون') ||
+    order.storeName?.includes('Amazon') ||
+    order.storeName?.includes('SHEIN') ||
+    order.storeName?.includes('شي إن') ||
+    order.storeName?.includes('AliExpress') ||
+    order.storeName?.includes('علي إكسبريس') ||
+    order.storeName?.includes('المتاجر العالمية') ||
+    (order.items && order.items.some((it: any) => 
+      it.productUrl || 
+      it.sourceUrl || 
+      it.url ||
+      it.isGlobal || 
+      it.storeId === 'amazon' ||
+      it.storeId === 'shein' ||
+      it.storeId === 'aliexpress' ||
+      it.storeName?.includes('أمازون') || 
+      it.storeName?.includes('Amazon') || 
+      it.storeName?.includes('AliExpress') || 
+      it.storeName?.includes('علي إكسبريس') || 
+      it.storeName?.includes('SHEIN') || 
+      it.storeName?.includes('شي إن')
+    ))
+  );
+
+  const globalOrdersCount = useMemo(() => safeOrders.filter(isOrderGlobal).length, [safeOrders]);
+  const localOrdersCount = safeOrders.length - globalOrdersCount;
+
+  // Firestore Realtime Drivers Listener
+  useEffect(() => {
+    let unsubscribe: any;
+    try {
+      const driversQuery = query(collection(db, 'drivers'));
+      unsubscribe = onSnapshot(driversQuery, (snapshot) => {
+        const fetchedList: DriverUser[] = snapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as DriverUser[];
+
+        if (fetchedList.length > 0) {
+          const combined = [...fetchedList];
+          DEFAULT_DRIVERS.forEach(defDrv => {
+            if (!combined.some(d => d.id === defDrv.id || d.phone === defDrv.phone)) {
+              combined.push(defDrv);
+            }
+          });
+          setDrivers(combined);
+        } else {
+          setDrivers(DEFAULT_DRIVERS);
+        }
+      }, (err) => {
+        console.warn('Drivers listener fallback:', err);
+        setDrivers(DEFAULT_DRIVERS);
+      });
+    } catch (e) {
+      setDrivers(DEFAULT_DRIVERS);
+    }
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);

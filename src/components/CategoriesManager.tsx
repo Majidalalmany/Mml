@@ -15,19 +15,12 @@ import {
   Image as ImageIcon,
   Truck,
   Wrench,
-  ExternalLink,
   Store as StoreIcon,
   LayoutGrid,
   List,
-  Sparkles,
-  ArrowRight,
-  Filter,
-  Check,
-  Smartphone,
-  ChevronRight,
-  ShoppingBag
+  ChevronRight
 } from 'lucide-react';
-import { Category, Product, Store, AdminUser } from '../types';
+import { Category, Store, Product, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
 import { 
   getCategoryImageUrl, 
@@ -35,6 +28,7 @@ import {
   DEFAULT_CATEGORY_BANNER
 } from '../lib/categoryUtils';
 import { db, collection, query, onSnapshot } from '../lib/firebase';
+import { CascadeDeleteModal } from './CascadeDeleteModal';
 
 interface CategoriesManagerProps {
   categories?: Category[];
@@ -43,7 +37,7 @@ interface CategoriesManagerProps {
   isLoading?: boolean;
   onAddCategory: () => void;
   onEditCategory: (category: Category) => void;
-  onDeleteCategory: (categoryId: string) => void;
+  onDeleteCategory: (categoryId: string) => Promise<void> | void;
   onToggleStatus: (category: Category) => void;
   onSeedData: () => void;
   onNavigateToStores?: (categoryId?: string) => void;
@@ -52,8 +46,6 @@ interface CategoriesManagerProps {
 
 export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   categories: propCategories = [],
-  stores: propStores = [],
-  products: propProducts = [],
   isLoading: propIsLoading = false,
   onAddCategory,
   onEditCategory,
@@ -64,41 +56,34 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   currentUser
 }) => {
   const [internalCategories, setInternalCategories] = useState<Category[]>(propCategories);
-  const [internalStores, setInternalStores] = useState<Store[]>(propStores);
-  const [internalProducts, setInternalProducts] = useState<Product[]>(propProducts);
   const [isComponentLoading, setIsComponentLoading] = useState(false);
 
-  useEffect(() => {
-    let unsubCategories = () => {};
-    let unsubStores = () => {};
-    let unsubProducts = () => {};
+  // Cascade delete modal state
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
+  // ⚠️ إيقاف استنزاف فايربيس: الاستماع لمجموعة categories فقط دون جلب آلاف المتاجر والمنتجات
+  useEffect(() => {
     setIsComponentLoading(true);
 
     const qCat = query(collection(db, 'categories'));
-    unsubCategories = onSnapshot(qCat, (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
-      list.sort((a, b) => (a.order || 0) - (b.order || 0));
-      setInternalCategories(list);
-      setIsComponentLoading(false);
-    }, () => setIsComponentLoading(false));
-
-    const qStores = query(collection(db, 'stores'));
-    unsubStores = onSnapshot(qStores, (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Store[];
-      setInternalStores(list);
-    }, () => {});
-
-    const qProds = query(collection(db, 'products'));
-    unsubProducts = onSnapshot(qProds, (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
-      setInternalProducts(list);
-    }, () => {});
+    const unsubCategories = onSnapshot(
+      qCat, 
+      (snapshot) => {
+        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+        list.sort((a, b) => (a.order || 0) - (b.order || 0));
+        setInternalCategories(list);
+        setIsComponentLoading(false);
+      }, 
+      (error) => {
+        console.warn('Categories listener error:', error);
+        setIsComponentLoading(false);
+      }
+    );
 
     return () => {
       unsubCategories();
-      unsubStores();
-      unsubProducts();
     };
   }, []);
 
@@ -106,25 +91,9 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
     if (propCategories && propCategories.length > 0) setInternalCategories(propCategories);
   }, [propCategories]);
 
-  useEffect(() => {
-    if (propStores && propStores.length > 0) setInternalStores(propStores);
-  }, [propStores]);
-
-  useEffect(() => {
-    if (propProducts && propProducts.length > 0) setInternalProducts(propProducts);
-  }, [propProducts]);
-
   const safeCategories = useMemo(() => 
     internalCategories.length > 0 ? internalCategories : propCategories, 
     [internalCategories, propCategories]
-  );
-  const safeStores = useMemo(() => 
-    internalStores.length > 0 ? internalStores : propStores, 
-    [internalStores, propStores]
-  );
-  const safeProducts = useMemo(() => 
-    internalProducts.length > 0 ? internalProducts : propProducts, 
-    [internalProducts, propProducts]
   );
   const isLoading = propIsLoading || isComponentLoading;
 
@@ -132,7 +101,6 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   const [typeFilter, setTypeFilter] = useState<'all' | 'delivery' | 'field_service'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   const canCreate = hasModulePermission(currentUser?.permissions, currentUser?.role, 'categories', 'create');
   const canEdit = hasModulePermission(currentUser?.permissions, currentUser?.role, 'categories', 'edit');
@@ -169,16 +137,20 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   const deliveryCategories = safeCategories.filter(c => c.serviceTypeCategory !== 'field_service' && c.id !== 'cat-manfaa' && c.id !== 'cat-fazaa').length;
   const fieldServiceCategories = totalCategories - deliveryCategories;
 
-  // Count stores and products per category
-  const getStoreCount = (category: Category) => {
-    return safeStores.filter(s => s.categoryId === category.id || s.categoryName === category.name).length;
+  // Handle confirmed cascade deletion
+  const handleConfirmDelete = async () => {
+    if (!categoryToDelete) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteCategory(categoryToDelete.id);
+      setIsDeleteModalOpen(false);
+      setCategoryToDelete(null);
+    } catch (error) {
+      console.error('Error during category deletion:', error);
+    } finally {
+      setIsDeleting(false);
+    }
   };
-
-  const getProductCount = (category: Category) => {
-    return safeProducts.filter(p => p.categoryId === category.id || p.categoryName === category.name).length;
-  };
-
-  const selectedCategory = safeCategories.find(c => c.id === selectedCategoryId);
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
@@ -442,8 +414,6 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
             const catImage = getCategoryImageUrl(category, category.name);
             const catSubtitle = getCategorySubtitle(category, category.name);
             const isServiceActive = category.status ? category.status === 'active' : (category.isActive !== false);
-            const storeCount = getStoreCount(category);
-            const productCount = getProductCount(category);
             const isFieldService = category.serviceTypeCategory === 'field_service' || category.id === 'cat-manfaa' || category.id === 'cat-fazaa';
             const bannerImg = category.bannerUrl || category.bannerImageUrl || category.banner_image_url || DEFAULT_CATEGORY_BANNER;
 
@@ -534,29 +504,37 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                     </p>
                   </div>
 
-                  {/* Stats footprint */}
-                  <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-slate-500">
-                    <div className="flex items-center gap-3">
-                      <span className="flex items-center gap-1 font-semibold text-slate-700">
-                        <StoreIcon className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{storeCount} متاجر</span>
-                      </span>
-                      <span className="flex items-center gap-1 font-semibold text-slate-700">
-                        <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{productCount} منتجات</span>
-                      </span>
-                    </div>
+                  {/* Card Actions & Status (Replaced heavy counters with direct store navigation & read-only status badge) */}
+                  <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+                    {onNavigateToStores ? (
+                      <button
+                        onClick={() => onNavigateToStores(category.id)}
+                        className="inline-flex items-center gap-1.5 font-bold text-blue-600 hover:text-blue-700 text-xs py-1 px-2.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
+                        title="استعراض المتاجر التابعة لهذا القسم"
+                      >
+                        <StoreIcon className="w-3.5 h-3.5" />
+                        <span>استعراض المتاجر</span>
+                        <ChevronRight className="w-3 h-3 rotate-180" />
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">قسم خدمات معتمد</span>
+                    )}
 
                     {/* Read-Only Status Badge */}
-                    <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${isServiceActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {isServiceActive ? 'نشط' : 'متوقف'}
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                      isServiceActive 
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' 
+                        : 'bg-slate-100 text-slate-500 border border-slate-200'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isServiceActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                      <span>{isServiceActive ? 'نشط' : 'متوقف'}</span>
                     </span>
                   </div>
                 </div>
 
                 {/* Card Footer: Action Buttons */}
                 <div className="p-3 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     {/* Edit Button */}
                     {canEdit && (
                       <button
@@ -573,29 +551,39 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                     {canEdit && (
                       <button
                         onClick={() => onToggleStatus(category)}
-                        className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                           isServiceActive 
                             ? 'bg-gray-100 text-slate-600 hover:bg-amber-100 hover:text-amber-800' 
                             : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                         }`}
                         title={isServiceActive ? 'إخفاء الخدمة من واجهة التطبيق' : 'إظهار الخدمة في واجهة التطبيق'}
                       >
-                        {isServiceActive ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        {isServiceActive ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>إخفاء</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>إظهار</span>
+                          </>
+                        )}
                       </button>
                     )}
 
-                    {/* Delete button */}
+                    {/* Cascade Delete Button */}
                     {canDelete && (
                       <button
                         onClick={() => {
-                          if (window.confirm('هل أنت متأكد من حذف هذه الفئة وجميع المتاجر والأصناف التابعة لها بشكل نهائي؟')) {
-                            onDeleteCategory(category.id);
-                          }
+                          setCategoryToDelete(category);
+                          setIsDeleteModalOpen(true);
                         }}
-                        className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                        title="حذف هذه الفئة"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer"
+                        title="حذف هذه الفئة والمتاجر التابعة لها نهائياً"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف</span>
                       </button>
                     )}
                   </div>
@@ -606,7 +594,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                       onClick={() => onNavigateToStores(category.id)}
                       className="flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-blue-600 py-1 px-2 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
                     >
-                      <span>تصفح المتاجر</span>
+                      <span>المتاجر</span>
                       <ChevronRight className="w-3 h-3 rotate-180" />
                     </button>
                   )}
@@ -628,7 +616,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                   <th className="p-4">الوصف والشعار</th>
                   <th className="p-4 text-center">نوع الخدمة</th>
                   <th className="p-4 text-center">الترتيب</th>
-                  <th className="p-4 text-center">المتاجر والأصناف</th>
+                  <th className="p-4 text-center">المتاجر</th>
                   <th className="p-4 text-center">الحالة</th>
                   <th className="p-4 text-center">الإجراءات</th>
                 </tr>
@@ -638,8 +626,6 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                   const catImage = getCategoryImageUrl(category, category.name);
                   const catSubtitle = getCategorySubtitle(category, category.name);
                   const isServiceActive = category.status ? category.status === 'active' : (category.isActive !== false);
-                  const storeCount = getStoreCount(category);
-                  const productCount = getProductCount(category);
                   const isFieldService = category.serviceTypeCategory === 'field_service' || category.id === 'cat-manfaa' || category.id === 'cat-fazaa';
 
                   return (
@@ -709,29 +695,32 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                         </span>
                       </td>
 
-                      {/* Linked Stores & Products */}
+                      {/* Stores Action */}
                       <td className="p-4 text-center font-sans">
-                        <div className="flex flex-col items-center gap-1">
-                          <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-[11px] px-2 py-0.5 rounded-md font-bold">
-                            {storeCount} متاجر
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {productCount} أصناف
-                          </span>
-                        </div>
+                        {onNavigateToStores ? (
+                          <button
+                            onClick={() => onNavigateToStores(category.id)}
+                            className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+                            title="استعراض متاجر هذا القسم"
+                          >
+                            <StoreIcon className="w-3.5 h-3.5" />
+                            <span>استعراض المتاجر</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-400 text-xs">—</span>
+                        )}
                       </td>
 
                       {/* Read-Only Status Badge */}
                       <td className="p-4 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`px-3 py-1 rounded-full text-[11px] font-bold ${
-                            isServiceActive 
-                              ? 'bg-emerald-100 text-emerald-800' 
-                              : 'bg-gray-100 text-slate-500'
-                          }`}>
-                            {isServiceActive ? 'نشط (مفعل)' : 'متوقف (مخفي)'}
-                          </span>
-                        </div>
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold ${
+                          isServiceActive 
+                            ? 'bg-emerald-100 text-emerald-800' 
+                            : 'bg-gray-100 text-slate-500'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isServiceActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                          <span>{isServiceActive ? 'نشط' : 'متوقف'}</span>
+                        </span>
                       </td>
 
                       {/* Action buttons */}
@@ -764,12 +753,11 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                           {canDelete && (
                             <button
                               onClick={() => {
-                                if (window.confirm('هل أنت متأكد من حذف هذه الفئة وجميع المتاجر والأصناف التابعة لها بشكل نهائي؟')) {
-                                  onDeleteCategory(category.id);
-                                }
+                                setCategoryToDelete(category);
+                                setIsDeleteModalOpen(true);
                               }}
                               className="w-8 h-8 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 flex items-center justify-center shadow-2xs transition-all active:scale-95 cursor-pointer"
-                              title="حذف هذا النشاط"
+                              title="حذف هذا النشاط نهائياً"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -794,6 +782,21 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Cascade Delete Confirmation Modal */}
+      <CascadeDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setCategoryToDelete(null);
+          }
+        }}
+        onConfirm={handleConfirmDelete}
+        itemType="category"
+        item={categoryToDelete}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 };

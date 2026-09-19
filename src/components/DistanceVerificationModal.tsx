@@ -13,9 +13,10 @@ import {
   Maximize2,
   TrendingUp
 } from 'lucide-react';
-import L from 'leaflet';
 import { Order } from '../types';
 import { calculateAirDistance, calculateRoadDistance, fetchLiveOsrmRoadRoute } from '../lib/routingService';
+import { loadGoogleMaps } from '../lib/googleMaps';
+import { createAdvancedMarker } from './DriversMapManager';
 
 interface DistanceVerificationModalProps {
   isOpen: boolean;
@@ -25,23 +26,7 @@ interface DistanceVerificationModalProps {
   customDropoff?: { lat: number; lng: number; label: string };
 }
 
-type TileType = 'streets' | 'osm' | 'satellite';
-
-const TILES: Record<TileType, { name: string; url: string; subdomains?: string }> = {
-  streets: {
-    name: 'شوارع ناصعة',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd'
-  },
-  osm: {
-    name: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-  },
-  satellite: {
-    name: 'أقمار صناعية 🛰️',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-  }
-};
+type GoogleMapType = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
 
 export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps> = ({
   isOpen,
@@ -51,9 +36,8 @@ export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps>
   customDropoff
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const [activeTile, setActiveTile] = useState<TileType>('streets');
+  const mapInstanceRef = useRef<any>(null);
+  const [activeMapType, setActiveMapType] = useState<GoogleMapType>('roadmap');
 
   // Coordinates extraction with default fallback to Sanaa
   const pickupLat = customPickup?.lat || order?.pickupLat || 15.3184;
@@ -71,137 +55,164 @@ export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps>
   const differenceKm = Number((roadDist - airDist).toFixed(1));
   const multiplier = airDist > 0 ? Number((roadDist / airDist).toFixed(2)) : 1.38;
 
-  // Initialize Map
+  // Initialize Google Map
   useEffect(() => {
     if (!isOpen || !mapContainerRef.current) return;
 
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
+    let isSubscribed = true;
 
-    const map = L.map(mapContainerRef.current, {
-      center: [(pickupLat + dropoffLat) / 2, (pickupLng + dropoffLng) / 2],
-      zoom: 13,
-      zoomControl: true
-    });
+    loadGoogleMaps().then(async (google) => {
+      if (!isSubscribed || !mapContainerRef.current || !google?.maps) return;
 
-    const currentTile = TILES[activeTile];
-    tileLayerRef.current = L.tileLayer(currentTile.url, {
-      subdomains: currentTile.subdomains || 'abc',
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    // Custom Store Icon
-    const storeIcon = L.divIcon({
-      className: 'custom-store-pin',
-      html: `
-        <div style="background-color: #16a34a; color: white; width: 36px; height: 36px; border-radius: 12px; display: flex; items-center: center; justify-content: center; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.4); border: 2px solid white; font-size: 18px; line-height: 32px; text-align: center;">
-          🏪
-        </div>
-      `,
-      iconSize: [36, 36],
-      iconAnchor: [18, 36]
-    });
-
-    // Custom Customer Icon
-    const customerIcon = L.divIcon({
-      className: 'custom-customer-pin',
-      html: `
-        <div style="background-color: #2563eb; color: white; width: 36px; height: 36px; border-radius: 12px; display: flex; items-center: center; justify-content: center; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); border: 2px solid white; font-size: 18px; line-height: 32px; text-align: center;">
-          📍
-        </div>
-      `,
-      iconSize: [36, 36],
-      iconAnchor: [18, 36]
-    });
-
-    // Add Store Marker
-    const storeMarker = L.marker([pickupLat, pickupLng], { icon: storeIcon })
-      .addTo(map)
-      .bindPopup(`
-        <div style="direction: rtl; text-align: right; font-family: sans-serif; padding: 4px;">
-          <strong style="color: #16a34a; font-size: 13px;">🏪 نقطة المتجر (الانطلاق):</strong>
-          <p style="margin: 4px 0 2px 0; font-weight: bold; font-size: 12px;">${pickupName}</p>
-          <p style="margin: 0; color: #64748b; font-size: 10px; font-family: monospace;">الإحداثيات: ${pickupLat.toFixed(4)}, ${pickupLng.toFixed(4)}</p>
-        </div>
-      `);
-
-    // Add Customer Marker
-    const customerMarker = L.marker([dropoffLat, dropoffLng], { icon: customerIcon })
-      .addTo(map)
-      .bindPopup(`
-        <div style="direction: rtl; text-align: right; font-family: sans-serif; padding: 4px;">
-          <strong style="color: #2563eb; font-size: 13px;">📍 نقطة العميل (الوصول):</strong>
-          <p style="margin: 4px 0 2px 0; font-weight: bold; font-size: 12px;">${dropoffName}</p>
-          <p style="margin: 0; color: #64748b; font-size: 10px; font-family: monospace;">الإحداثيات: ${dropoffLat.toFixed(4)}, ${dropoffLng.toFixed(4)}</p>
-        </div>
-      `);
-
-    // 1. Straight Air Line (Dashed Gray)
-    const airLine = L.polyline([[pickupLat, pickupLng], [dropoffLat, dropoffLng]], {
-      color: '#94a3b8',
-      weight: 2.5,
-      dashArray: '6, 8',
-      opacity: 0.8
-    }).addTo(map);
-
-    // 2. Fetch and draw real-world OSRM road geometry
-    let roadPolyline: L.Polyline | null = null;
-    
-    // Initial intermediate curve as placeholder while OSRM loads
-    const midLat = (pickupLat + dropoffLat) / 2;
-    const midLng = (pickupLng + dropoffLng) / 2;
-    const offset1 = 0.003;
-    const offset2 = -0.002;
-
-    const initialPoints: [number, number][] = [
-      [pickupLat, pickupLng],
-      [pickupLat + (dropoffLat - pickupLat) * 0.25 + offset1, pickupLng + (dropoffLng - pickupLng) * 0.25],
-      [midLat + offset2, midLng + offset1],
-      [pickupLat + (dropoffLat - pickupLat) * 0.75 - offset1, pickupLng + (dropoffLng - pickupLng) * 0.75 + offset2],
-      [dropoffLat, dropoffLng]
-    ];
-
-    roadPolyline = L.polyline(initialPoints, {
-      color: '#2563eb',
-      weight: 5,
-      opacity: 0.9,
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).addTo(map);
-
-    // Fetch live OSRM coordinates
-    fetchLiveOsrmRoadRoute(pickupLat, pickupLng, dropoffLat, dropoffLng).then(res => {
-      if (res.coordinates && res.coordinates.length > 0 && mapInstanceRef.current) {
-        if (roadPolyline) {
-          roadPolyline.setLatLngs(res.coordinates);
+      if (google.maps.importLibrary) {
+        try {
+          await google.maps.importLibrary("marker");
+        } catch (e) {
+          console.warn('Could not import marker library:', e);
         }
       }
+
+      const map = new google.maps.Map(mapContainerRef.current, {
+        center: { lat: (pickupLat + dropoffLat) / 2, lng: (pickupLng + dropoffLng) / 2 },
+        zoom: 13,
+        mapId: 'DEMO_MAP_ID',
+        mapTypeId: activeMapType,
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
+        zoomControl: true,
+        zoomControlOptions: {
+          position: google.maps.ControlPosition.LEFT_TOP
+        }
+      });
+
+      mapInstanceRef.current = map;
+
+      // Custom Store Icon SVG
+      const storeSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+          <circle cx="20" cy="20" r="18" fill="#16a34a" stroke="#ffffff" stroke-width="2.5" />
+          <text x="20" y="24" font-size="16" text-anchor="middle" dominant-baseline="central">🏪</text>
+        </svg>
+      `.trim();
+
+      // Custom Customer Icon SVG
+      const customerSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+          <circle cx="20" cy="20" r="18" fill="#2563eb" stroke="#ffffff" stroke-width="2.5" />
+          <text x="20" y="24" font-size="16" text-anchor="middle" dominant-baseline="central">📍</text>
+        </svg>
+      `.trim();
+
+      // Add Store Marker
+      const storeMarker = createAdvancedMarker({
+        position: { lat: pickupLat, lng: pickupLng },
+        map,
+        title: pickupName,
+        svgHtml: storeSvg,
+        zIndex: 30
+      });
+
+      const storeInfoWindow = new google.maps.InfoWindow({
+        content: `
+          <div style="direction: rtl; text-align: right; font-family: sans-serif; padding: 4px;">
+            <strong style="color: #16a34a; font-size: 13px;">🏪 نقطة المتجر (الانطلاق):</strong>
+            <p style="margin: 4px 0 2px 0; font-weight: bold; font-size: 12px;">${pickupName}</p>
+            <p style="margin: 0; color: #64748b; font-size: 10px; font-family: monospace;">الإحداثيات: ${pickupLat.toFixed(4)}, ${pickupLng.toFixed(4)}</p>
+          </div>
+        `
+      });
+      if (storeMarker) {
+        storeMarker.addListener('click', () => {
+          storeInfoWindow.open({ anchor: storeMarker, map });
+        });
+      }
+
+      // Add Customer Marker
+      const customerMarker = createAdvancedMarker({
+        position: { lat: dropoffLat, lng: dropoffLng },
+        map,
+        title: dropoffName,
+        svgHtml: customerSvg,
+        zIndex: 40
+      });
+
+      const customerInfoWindow = new google.maps.InfoWindow({
+        content: `
+          <div style="direction: rtl; text-align: right; font-family: sans-serif; padding: 4px;">
+            <strong style="color: #2563eb; font-size: 13px;">📍 نقطة العميل (الوصول):</strong>
+            <p style="margin: 4px 0 2px 0; font-weight: bold; font-size: 12px;">${dropoffName}</p>
+            <p style="margin: 0; color: #64748b; font-size: 10px; font-family: monospace;">الإحداثيات: ${dropoffLat.toFixed(4)}, ${dropoffLng.toFixed(4)}</p>
+          </div>
+        `
+      });
+      if (customerMarker) {
+        customerMarker.addListener('click', () => {
+          customerInfoWindow.open({ anchor: customerMarker, map });
+        });
+      }
+
+      // 1. Straight Air Line (Dashed Gray)
+      const airLine = new google.maps.Polyline({
+        path: [
+          { lat: pickupLat, lng: pickupLng },
+          { lat: dropoffLat, lng: dropoffLng }
+        ],
+        strokeColor: '#94a3b8',
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+        icons: [{
+          icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+          offset: '0',
+          repeat: '15px'
+        }],
+        map
+      });
+
+      // 2. Road Polyline
+      const roadPolyline = new google.maps.Polyline({
+        path: [
+          { lat: pickupLat, lng: pickupLng },
+          { lat: pickupLat + (dropoffLat - pickupLat) * 0.5, lng: pickupLng + (dropoffLng - pickupLng) * 0.5 },
+          { lat: dropoffLat, lng: dropoffLng }
+        ],
+        strokeColor: '#2563eb',
+        strokeOpacity: 0.9,
+        strokeWeight: 5,
+        map
+      });
+
+      // Fetch live OSRM coordinates or update path
+      fetchLiveOsrmRoadRoute(pickupLat, pickupLng, dropoffLat, dropoffLng).then(res => {
+        if (res.coordinates && res.coordinates.length > 0 && isSubscribed) {
+          const path = res.coordinates.map((c: [number, number]) => ({ lat: c[0], lng: c[1] }));
+          roadPolyline.setPath(path);
+        }
+      }).catch(err => {
+        console.warn('Could not fetch OSRM coordinates for verification map:', err);
+      });
+
+      // Fit bounds
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend({ lat: pickupLat, lng: pickupLng });
+      bounds.extend({ lat: dropoffLat, lng: dropoffLng });
+      map.fitBounds(bounds, 60);
     }).catch(err => {
-      console.warn('Could not fetch OSRM coordinates for verification map:', err);
+      console.error('Failed to load Google Maps for Distance Verification:', err);
     });
 
-    // 3. Bounding Box (المستطيل الجغرافي المحيط)
-    const bounds = L.latLngBounds([[pickupLat, pickupLng], [dropoffLat, dropoffLng]]);
-    const boundingBox = L.rectangle(bounds.pad(0.15), {
-      color: '#3b82f6',
-      weight: 1,
-      dashArray: '3, 4',
-      fillOpacity: 0.03
-    }).addTo(map);
-
-    map.fitBounds(bounds.pad(0.25));
-    mapInstanceRef.current = map;
-
     return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
+      isSubscribed = false;
     };
-  }, [isOpen, pickupLat, pickupLng, dropoffLat, dropoffLng, activeTile]);
+  }, [isOpen, pickupLat, pickupLng, dropoffLat, dropoffLng]);
+
+  // Handle map type change
+  const handleMapTypeChange = (type: GoogleMapType) => {
+    setActiveMapType(type);
+    if (mapInstanceRef.current && (window as any).google?.maps) {
+      mapInstanceRef.current.setMapTypeId(type);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -222,13 +233,16 @@ export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps>
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold">معاينة وتثبت المسافة بين نقطتي المتجر والعميل</h3>
+                <h3 className="text-sm font-bold">معاينة وتثبت المسافة عبر خرائط جوجل الرسمية</h3>
                 <span className="text-[10px] bg-blue-500/30 text-blue-300 px-2 py-0.5 rounded-full border border-blue-400 font-mono">
                   {roadDist} كم مسار طرقي
                 </span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-sans">
+                  Google Maps API نشط
+                </span>
               </div>
               <p className="text-[11px] text-slate-300">
-                {order?.orderNumber ? `الطلب ${order.orderNumber} • ` : ''}{pickupName} ⬅️ {dropoffName}
+                من: {pickupName} ⬅ إلى: {dropoffName}
               </p>
             </div>
           </div>
@@ -236,17 +250,18 @@ export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps>
           <div className="flex items-center gap-2">
             <button
               onClick={openInGoogleMaps}
-              className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="فتح المسار في خرائط جوجل للتحقق الخارجي"
+              className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              title="فتح المسار في تطبيق Google Maps"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">خرائط Google</span>
+              <span className="hidden sm:inline">فتح في Google Maps</span>
             </button>
-            <button 
+
+            <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -256,24 +271,24 @@ export const DistanceVerificationModal: React.FC<DistanceVerificationModalProps>
           <div ref={mapContainerRef} className="absolute inset-0 z-0" />
 
           {/* Map Layer Switcher Floating Pill */}
-          <div className="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-md rounded-xl p-1 shadow-md border border-gray-200 flex items-center gap-1 text-xs">
+          <div className="absolute top-3 right-3 z-10 bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-gray-200 flex items-center gap-1 text-xs">
             <button
-              onClick={() => setActiveTile('streets')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTile === 'streets' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
+              onClick={() => handleMapTypeChange('roadmap')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeMapType === 'roadmap' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
             >
-              شوارع
+              شوارع جوجل
             </button>
             <button
-              onClick={() => setActiveTile('osm')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTile === 'osm' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
+              onClick={() => handleMapTypeChange('satellite')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeMapType === 'satellite' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
             >
-              OSM
+              أقمار صناعية 🛰️
             </button>
             <button
-              onClick={() => setActiveTile('satellite')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeTile === 'satellite' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
+              onClick={() => handleMapTypeChange('terrain')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${activeMapType === 'terrain' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-gray-100'}`}
             >
-              أقمار صناعية
+              تضاريس 🏔️
             </button>
           </div>
 

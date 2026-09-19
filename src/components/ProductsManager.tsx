@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -20,12 +20,13 @@ import {
 } from 'lucide-react';
 import { Product, Category, Store, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface ProductsManagerProps {
-  products: Product[];
-  categories: Category[];
+  products?: Product[];
+  categories?: Category[];
   stores?: Store[];
-  isLoading: boolean;
+  isLoading?: boolean;
   onAddProduct: () => void;
   onEditProduct: (product: Product) => void;
   onViewProduct: (product: Product) => void;
@@ -36,10 +37,10 @@ interface ProductsManagerProps {
 }
 
 export const ProductsManager: React.FC<ProductsManagerProps> = ({
-  products = [],
-  categories = [],
-  stores = [],
-  isLoading,
+  products: propProducts = [],
+  categories: propCategories = [],
+  stores: propStores = [],
+  isLoading: propIsLoading,
   onAddProduct,
   onEditProduct,
   onViewProduct,
@@ -48,6 +49,57 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
   onSeedData,
   currentUser
 }) => {
+  const [internalProducts, setInternalProducts] = useState<Product[]>(propProducts);
+  const [internalCategories, setInternalCategories] = useState<Category[]>(propCategories);
+  const [internalStores, setInternalStores] = useState<Store[]>(propStores);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propProducts.length === 0);
+
+  useEffect(() => {
+    const productsQuery = query(collection(db, 'products'));
+    const unsubProducts = onSnapshot(productsQuery, (snapshot) => {
+      const list: Product[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      setInternalProducts(list);
+      setIsComponentLoading(false);
+    }, (err) => {
+      console.warn('Products onSnapshot error:', err);
+      setIsComponentLoading(false);
+    });
+
+    const catsQuery = query(collection(db, 'categories'));
+    const unsubCats = onSnapshot(catsQuery, (snapshot) => {
+      const list: Category[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+      setInternalCategories(list);
+    }, () => {});
+
+    const storesQuery = query(collection(db, 'stores'));
+    const unsubStores = onSnapshot(storesQuery, (snapshot) => {
+      const list: Store[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Store[];
+      setInternalStores(list);
+    }, () => {});
+
+    return () => {
+      unsubProducts();
+      unsubCats();
+      unsubStores();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propProducts && propProducts.length > 0) setInternalProducts(propProducts);
+  }, [propProducts]);
+
+  useEffect(() => {
+    if (propCategories && propCategories.length > 0) setInternalCategories(propCategories);
+  }, [propCategories]);
+
+  useEffect(() => {
+    if (propStores && propStores.length > 0) setInternalStores(propStores);
+  }, [propStores]);
+
+  const products = internalProducts.length > 0 ? internalProducts : propProducts;
+  const categories = internalCategories.length > 0 ? internalCategories : propCategories;
+  const stores = internalStores.length > 0 ? internalStores : propStores;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && products.length === 0);
   // Live Multi-Filter Engine State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStore, setSelectedStore] = useState<string>('all');
@@ -311,7 +363,7 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
               onChange={(e) => setSelectedStore(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium cursor-pointer"
             >
-              <option value="all">جميع المتاجر (الكل)</option>
+              <option key="all" value="all">جميع المتاجر (الكل)</option>
               {storeOptions.map((st) => (
                 <option key={st.id} value={st.id}>
                   {st.name}
@@ -441,7 +493,7 @@ export const ProductsManager: React.FC<ProductsManagerProps> = ({
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium cursor-pointer"
             >
-              <option value="all">التصنيف: الكل ({categories.length})</option>
+              <option key="all" value="all">التصنيف: الكل ({categories.length})</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}

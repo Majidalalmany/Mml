@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowRight, 
   Store as StoreIcon, 
@@ -23,11 +23,12 @@ import {
 } from 'lucide-react';
 import { Store, Category, Product, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
+import { db, collection, query, where, onSnapshot } from '../lib/firebase';
 
 interface StoreDetailPageProps {
   store: Store;
-  products: Product[];
-  categories: Category[];
+  products?: Product[];
+  categories?: Category[];
   onBack: () => void;
   onEditStore: (store: Store) => void;
   onUpdateStoreSections: (storeId: string, updatedSections: string[]) => void;
@@ -40,8 +41,8 @@ interface StoreDetailPageProps {
 
 export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
   store,
-  products = [],
-  categories = [],
+  products: propProducts,
+  categories: propCategories = [],
   onBack,
   onEditStore,
   onUpdateStoreSections,
@@ -51,6 +52,27 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
   onToggleProductInStock,
   currentUser
 }) => {
+  const [internalStoreProducts, setInternalStoreProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    if (propProducts && propProducts.length > 0) {
+      setInternalStoreProducts(propProducts);
+      return;
+    }
+
+    if (!store?.id) return;
+
+    const q = query(collection(db, 'products'), where('storeId', '==', store.id));
+    const unsub = onSnapshot(q, (snap) => {
+      const prods = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Product[];
+      setInternalStoreProducts(prods);
+    }, (err) => {
+      console.warn('Store products fetch notice:', err);
+    });
+
+    return () => unsub();
+  }, [store?.id, propProducts]);
+
   const canEditStore = hasModulePermission(currentUser, 'restaurants', 'edit');
   const canCreateProduct = hasModulePermission(currentUser, 'products', 'create');
   const canEditProduct = hasModulePermission(currentUser, 'products', 'edit');
@@ -74,9 +96,7 @@ export const StoreDetailPage: React.FC<StoreDetailPageProps> = ({
   const [deleteConfirmSecName, setDeleteConfirmSecName] = useState<string | null>(null);
 
   // Products belonging to this store
-  const storeProducts = products.filter(
-    p => p.storeId === store.id || p.storeName === store.id || p.storeName === store.name
-  );
+  const storeProducts = internalStoreProducts;
 
   // Filter products by selected section
   const filteredProducts = storeProducts.filter(p => {

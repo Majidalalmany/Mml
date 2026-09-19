@@ -8,10 +8,12 @@ import {
   addDoc, 
   setDoc,
   updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
+  deleteDoc, writeBatch, 
   query, 
-  orderBy 
+  where,
+  getDocs,
+  orderBy,
+  limit 
 } from './lib/firebase';
 import { Category, Product, Store, AdminUser, TabType, Order, OrderStatus, AuditLog, SupportTicket, FazaaOrder, FazaaCategory, AppUser, DriverUser } from './types';
 import { seedInitialFirestoreData } from './services/seedData';
@@ -48,6 +50,7 @@ import { AppUsersManager } from './components/AppUsersManager';
 import { DriversMapManager } from './components/DriversMapManager';
 import { InvoicesManager } from './components/InvoicesManager';
 import { GlobalStoresHub } from './components/global/GlobalStoresHub';
+import { BusinessCatalogManager } from './components/BusinessCatalogManager';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(() => {
@@ -76,14 +79,6 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
 
-  const [isLoadingCategories, setIsLoadingCategories] = useState<boolean>(true);
-  const [isLoadingProducts, setIsLoadingProducts] = useState<boolean>(true);
-  const [isLoadingStores, setIsLoadingStores] = useState<boolean>(true);
-  const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true);
-  const [isLoadingOrders, setIsLoadingOrders] = useState<boolean>(true);
-  const [isLoadingFazaa, setIsLoadingFazaa] = useState<boolean>(true);
-  const [isLoadingAppUsers, setIsLoadingAppUsers] = useState<boolean>(true);
-  const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(true);
   const [isSeeding, setIsSeeding] = useState<boolean>(false);
 
   // Modals state
@@ -130,313 +125,10 @@ export default function App() {
     };
   }, []);
 
-  // 1. Categories Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingCategories(true);
-    const categoriesQuery = query(collection(db, 'categories'));
-    
-    const unsubscribeCategories = onSnapshot(categoriesQuery, (snapshot) => {
-      const catList: Category[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Category[];
-
-      catList.sort((a, b) => (a.order || 0) - (b.order || 0));
-      setCategories(catList);
-      setIsLoadingCategories(false);
-    }, (error) => {
-      console.error('Categories listener error:', error);
-      setIsLoadingCategories(false);
-    });
-
-    return () => unsubscribeCategories();
-  }, []);
-
-  // 2. Stores Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingStores(true);
-    const storesQuery = query(collection(db, 'stores'));
-
-    const unsubscribeStores = onSnapshot(storesQuery, (snapshot) => {
-      const storeList: Store[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Store[];
-
-      setStores(storeList);
-      setIsLoadingStores(false);
-      
-      // Sync selectedStoreDetail if open
-      setSelectedStoreDetail(prev => {
-        if (!prev) return null;
-        const updated = storeList.find(s => s.id === prev.id);
-        return updated || prev;
-      });
-    }, (error) => {
-      console.error('Stores listener error:', error);
-      setIsLoadingStores(false);
-    });
-
-    return () => unsubscribeStores();
-  }, []);
-
-  // 3. Products Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingProducts(true);
-    const productsQuery = query(collection(db, 'products'));
-
-    const unsubscribeProducts = onSnapshot(productsQuery, (snapshot) => {
-      const prodList: Product[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Product[];
-
-      setProducts(prodList);
-      setIsLoadingProducts(false);
-    }, (error) => {
-      console.error('Products listener error:', error);
-      setIsLoadingProducts(false);
-    });
-
-    return () => unsubscribeProducts();
-  }, []);
-
-  // 4. Admin Users Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingUsers(true);
-    const usersQuery = query(collection(db, 'adminUsers'));
-
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const uList: AdminUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AdminUser[];
-
-      setAdminUsers(uList);
-      setIsLoadingUsers(false);
-    }, (error) => {
-      console.warn('Admin Users listener fallback:', error);
-      setIsLoadingUsers(false);
-    });
-
-    return () => unsubscribeUsers();
-  }, []);
-
-  // 5. Orders Firestore Realtime Listener (Single Source of Truth)
-  useEffect(() => {
-    setIsLoadingOrders(true);
-
-    const ordersQuery = query(collection(db, 'orders'));
-
-    const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
-      const oList: Order[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Order[];
-
-      setOrders(oList);
-      setIsLoadingOrders(false);
-    }, (error) => {
-      console.warn('Orders listener error:', error);
-      setIsLoadingOrders(false);
-    });
-
-    const handleOrderPlaced = (e: any) => {
-      const newOrder = e.detail?.order;
-      if (newOrder) {
-        setOrders(prev => {
-          if (prev.some(o => o.id === newOrder.id || o.orderNumber === newOrder.orderNumber)) {
-            return prev;
-          }
-          return [newOrder, ...prev];
-        });
-      }
-    };
-    window.addEventListener('jahez_order_placed', handleOrderPlaced);
-
-    return () => {
-      unsubscribeOrders();
-      window.removeEventListener('jahez_order_placed', handleOrderPlaced);
-    };
-  }, []);
-
-  // 6. Audit Logs Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingAudit(true);
-    const auditQuery = query(collection(db, 'audit_logs'));
-
-    const unsubscribeAudit = onSnapshot(auditQuery, (snapshot) => {
-      const aList: AuditLog[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AuditLog[];
-
-      setAuditLogs(aList);
-      setIsLoadingAudit(false);
-    }, (error) => {
-      console.warn('Audit logs listener fallback:', error);
-      setIsLoadingAudit(false);
-    });
-
-    return () => unsubscribeAudit();
-  }, []);
-
-  // 7. Support Tickets Firestore Realtime Listener
-  useEffect(() => {
-    const ticketsQuery = query(collection(db, 'support_tickets'));
-
-    const unsubscribeTickets = onSnapshot(ticketsQuery, (snapshot) => {
-      const tList: SupportTicket[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as SupportTicket[];
-
-      setSupportTickets(tList);
-    }, (error) => {
-      console.warn('Support tickets listener fallback:', error);
-    });
-
-    return () => unsubscribeTickets();
-  }, []);
-
-  // 7b. Drivers Realtime Listener
-  useEffect(() => {
-    const driversQuery = query(collection(db, 'drivers'));
-    const unsubscribeDrivers = onSnapshot(driversQuery, (snapshot) => {
-      const dList: DriverUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as DriverUser[];
-      setDrivers(dList);
-    }, (error) => {
-      console.warn('Drivers listener fallback:', error);
-    });
-    return () => unsubscribeDrivers();
-  }, []);
-
-  // 8. Fazaa & Manfaa Orders Realtime Listener
-  useEffect(() => {
-    setIsLoadingFazaa(true);
-    let fazaaList: FazaaOrder[] = [];
-    let manfaaList: FazaaOrder[] = [];
-
-    const updateCombinedFazaaOrders = () => {
-      const combined = [...fazaaList];
-      manfaaList.forEach(mDoc => {
-        if (!combined.some(f => f.id === mDoc.id)) {
-          combined.push(mDoc);
-        }
-      });
-      setFazaaOrders(combined);
-      setIsLoadingFazaa(false);
-    };
-
-    const fazaaQuery = query(collection(db, 'fazaa_orders'));
-    const unsubscribeFazaa = onSnapshot(fazaaQuery, (snapshot) => {
-      fazaaList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaOrder[];
-      updateCombinedFazaaOrders();
-    }, (error) => {
-      console.warn('Fazaa orders listener fallback:', error);
-      setIsLoadingFazaa(false);
-    });
-
-    const manfaaQuery = query(collection(db, 'manfaa_orders'));
-    const unsubscribeManfaa = onSnapshot(manfaaQuery, (snapshot) => {
-      manfaaList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaOrder[];
-      updateCombinedFazaaOrders();
-    }, (error) => {
-      console.warn('Manfaa orders listener fallback:', error);
-    });
-
-    return () => {
-      unsubscribeFazaa();
-      unsubscribeManfaa();
-    };
-  }, []);
-
-  // 9. Fazaa Categories Listener
-  useEffect(() => {
-    const catQuery = query(collection(db, 'fazaa_categories'));
-    const unsubscribeCats = onSnapshot(catQuery, (snapshot) => {
-      const list: FazaaCategory[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as FazaaCategory[];
-      if (list.length > 0) {
-        setFazaaCategories(list);
-      } else {
-        fetch('/api/fazaa/categories')
-          .then(res => res.json())
-          .then(data => {
-            if (data.categories) setFazaaCategories(data.categories);
-          })
-          .catch(err => console.warn('Fazaa categories fallback:', err));
-      }
-    }, () => {
-      fetch('/api/fazaa/categories')
-        .then(res => res.json())
-        .then(data => {
-          if (data.categories) setFazaaCategories(data.categories);
-        });
-    });
-
-    return () => unsubscribeCats();
-  }, []);
-
-  // 10. Clients Collection Firestore Realtime Listener
-  useEffect(() => {
-    setIsLoadingAppUsers(true);
-    const clientsQuery = query(collection(db, 'clients'));
-    const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
-      const list: AppUser[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AppUser[];
-      
-      if (list.length > 0) {
-        setAppUsers(list);
-        setIsLoadingAppUsers(false);
-      } else {
-        // Fallback check on app_users
-        const legacyQuery = query(collection(db, 'app_users'));
-        import('./lib/firebase').then(({ getDocs }) => {
-          getDocs(legacyQuery).then((legSnap) => {
-            const legList = legSnap.docs.map(d => ({ id: d.id, ...d.data() })) as AppUser[];
-            if (legList.length > 0) {
-              setAppUsers(legList);
-            } else {
-              fetch('/api/users')
-                .then(res => res.json())
-                .then(data => { if (data.users) setAppUsers(data.users); })
-                .catch(() => {});
-            }
-            setIsLoadingAppUsers(false);
-          }).catch(() => {
-            fetch('/api/users')
-              .then(res => res.json())
-              .then(data => { if (data.users) setAppUsers(data.users); })
-              .catch(() => {})
-              .finally(() => setIsLoadingAppUsers(false));
-          });
-        });
-      }
-    }, () => {
-      // Graceful fallback to backend API on permission or read issues without blocking app state
-      fetch('/api/users')
-        .then(res => res.json())
-        .then(data => { if (data.users) setAppUsers(data.users); })
-        .catch(() => {})
-        .finally(() => setIsLoadingAppUsers(false));
-    });
-
-    return () => unsubscribeClients();
-  }, []);
+  // Notice: Global onSnapshot listeners removed in favor of Component-Level Lazy Fetching.
+  // Child components (OrdersManager, BusinessCatalogManager, StoresManager, ProductsManager,
+  // AdminUsersManager, AuditLogsManager, FazaaOrdersManager, AppUsersManager, DashboardOverview)
+  // now subscribe independently on mount and clean up on unmount to prevent system bottlenecks.
 
   // Fazaa Handlers
   const handleCreateFazaaOrder = async (orderData: Partial<FazaaOrder>) => {
@@ -704,13 +396,24 @@ export default function App() {
     }
   };
 
-  // Auto-seed if Firestore database is empty on first load
+  // Auto-seed if Firestore database is empty on first load (Sole useEffect retained for data seeding)
   useEffect(() => {
-    if (!isLoadingCategories && !isLoadingProducts && !isLoadingStores && !isLoadingOrders &&
-        categories.length === 0 && products.length === 0 && stores.length === 0 && orders.length === 0) {
-      handleSeedData();
-    }
-  }, [isLoadingCategories, isLoadingProducts, isLoadingStores, isLoadingOrders]);
+    let isMounted = true;
+    const verifyAndSeedInitialData = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'categories'), limit(1)));
+        if (snap.empty && isMounted) {
+          await handleSeedData();
+        }
+      } catch (err) {
+        console.warn('Initial seed check non-blocking fallback:', err);
+      }
+    };
+    verifyAndSeedInitialData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Orders CRUD Handlers
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => {
@@ -893,20 +596,53 @@ export default function App() {
   const handleDeleteStore = async (storeId: string) => {
     try {
       const st = stores.find(s => s.id === storeId);
-      await deleteDoc(doc(db, 'stores', storeId));
-      showToast('تم حذف المتجر بنجاح من Firestore');
+      const batch = writeBatch(db);
+      
+      // 1. Delete the store itself
+      batch.delete(doc(db, 'stores', storeId));
+      
+      // 2. Query Firestore for ALL products belonging to this storeId
+      const deletedProductIds = new Set<string>();
+      try {
+        const productsSnap = await getDocs(
+          query(collection(db, 'products'), where('storeId', '==', storeId))
+        );
+        productsSnap.forEach(pDoc => {
+          deletedProductIds.add(pDoc.id);
+          batch.delete(doc(db, 'products', pDoc.id));
+        });
+      } catch (queryErr) {
+        console.warn('Firestore query products by storeId warning:', queryErr);
+      }
+
+      // Also include any products in current memory state for this store
+      products.filter(p => p.storeId === storeId).forEach(p => {
+        if (!deletedProductIds.has(p.id)) {
+          deletedProductIds.add(p.id);
+          batch.delete(doc(db, 'products', p.id));
+        }
+      });
+
+      // 3. Commit atomic batch to Firestore
+      await batch.commit();
+
+      // 4. Reliable UI State updates ONLY AFTER batch.commit() succeeds
+      setStores(prev => prev.filter(s => s.id !== storeId));
+      setProducts(prev => prev.filter(p => !deletedProductIds.has(p.id)));
+
+      showToast(`تم حذف المتجر و(${deletedProductIds.size}) صنف/منتج تابع له بنجاح`);
       await logSystemActivity({
-        action: 'حذف متجر',
+        action: 'حذف متجر متسلسل',
         performedBy: currentUser ? currentUser.name : 'المدير العام',
         userEmail: currentUser?.email,
         targetType: 'store',
         targetName: st?.name || storeId,
-        details: `حذف المتجر ${st?.name} نهائياً من قاعدة البيانات`,
+        details: `حذف المتجر ${st?.name || storeId} وجميع الأصناف التابعة له (${deletedProductIds.size}) من قاعدة البيانات`,
         severity: 'warning'
       });
     } catch (err: any) {
-      console.error('Error deleting store:', err);
-      showToast('فشل حذف المتجر: ' + (err.message || ''), 'error');
+      console.error('Error in cascade delete store:', err);
+      showToast('خطأ: تعذر حذف المتجر والأصناف التابعة له: ' + (err.message || 'حدث خطأ أثناء الاتصال بقاعدة البيانات'), 'error');
     }
   };
 
@@ -1213,12 +949,98 @@ export default function App() {
 
   const handleDeleteCategory = async (categoryId: string) => {
     try {
-      await deleteDoc(doc(db, 'categories', categoryId));
+      const batch = writeBatch(db);
+      
+      // 1. Delete the category itself
+      batch.delete(doc(db, 'categories', categoryId));
+      
+      // 2. Query Firestore for ALL stores belonging to this categoryId
+      const foundStoreIds = new Set<string>();
+      try {
+        const storesQuerySnap = await getDocs(
+          query(collection(db, 'stores'), where('categoryId', '==', categoryId))
+        );
+        storesQuerySnap.forEach((sDoc) => {
+          foundStoreIds.add(sDoc.id);
+          batch.delete(doc(db, 'stores', sDoc.id));
+        });
+      } catch (storeQueryErr) {
+        console.warn('Firestore query stores by categoryId warning:', storeQueryErr);
+      }
+
+      // Also include any stores in current memory state matching categoryId
+      stores.filter(s => s.categoryId === categoryId).forEach(s => {
+        if (!foundStoreIds.has(s.id)) {
+          foundStoreIds.add(s.id);
+          batch.delete(doc(db, 'stores', s.id));
+        }
+      });
+
+      // 3. For all identified stores and for category products, find all products
+      const deletedProductIds = new Set<string>();
+
+      // Products by categoryId
+      try {
+        const catProductsSnap = await getDocs(
+          query(collection(db, 'products'), where('categoryId', '==', categoryId))
+        );
+        catProductsSnap.forEach((pDoc) => {
+          deletedProductIds.add(pDoc.id);
+          batch.delete(doc(db, 'products', pDoc.id));
+        });
+      } catch (catProdErr) {
+        console.warn('Firestore query products by categoryId warning:', catProdErr);
+      }
+
+      // Products by each storeId
+      for (const stId of Array.from(foundStoreIds)) {
+        try {
+          const storeProductsSnap = await getDocs(
+            query(collection(db, 'products'), where('storeId', '==', stId))
+          );
+          storeProductsSnap.forEach((pDoc) => {
+            if (!deletedProductIds.has(pDoc.id)) {
+              deletedProductIds.add(pDoc.id);
+              batch.delete(doc(db, 'products', pDoc.id));
+            }
+          });
+        } catch (stProdErr) {
+          console.warn('Firestore query products by storeId warning:', stProdErr);
+        }
+      }
+
+      // Also check memory state for any products matching category or stores
+      products.forEach(p => {
+        if (p.categoryId === categoryId || foundStoreIds.has(p.storeId)) {
+          if (!deletedProductIds.has(p.id)) {
+            deletedProductIds.add(p.id);
+            batch.delete(doc(db, 'products', p.id));
+          }
+        }
+      });
+
+      // 4. Commit atomic batch to Firestore
+      await batch.commit();
+
+      // 5. Reliable UI State updates ONLY AFTER batch.commit() succeeds
       setCategories(prev => prev.filter(c => c.id !== categoryId));
-      showToast('تم حذف التصنيف بنجاح من Firestore');
+      setStores(prev => prev.filter(s => !foundStoreIds.has(s.id)));
+      setProducts(prev => prev.filter(p => !deletedProductIds.has(p.id)));
+
+      showToast(`تم حذف الفئة و(${foundStoreIds.size}) متجر و(${deletedProductIds.size}) صنف بنجاح`);
+      
+      await logSystemActivity({
+        action: 'حذف فئة متسلسل',
+        performedBy: currentUser ? currentUser.name : 'المدير العام',
+        userEmail: currentUser?.email,
+        targetType: 'category',
+        targetName: categoryId,
+        details: `حذف الفئة ${categoryId} وكافة المتاجر (${foundStoreIds.size}) والمنتجات (${deletedProductIds.size}) التابعة لها متسلسلاً`,
+        severity: 'warning'
+      });
     } catch (err: any) {
-      console.error('Error deleting category:', err);
-      showToast('فشل حذف التصنيف: ' + (err.message || ''), 'error');
+      console.error('Error in cascade delete category:', err);
+      showToast('خطأ: تعذر حذف الفئة لارتباطات البيانات: ' + (err.message || 'حدث خطأ في قاعدة البيانات'), 'error');
     }
   };
 
@@ -1326,10 +1148,6 @@ export default function App() {
           }}
           isOpen={isSidebarOpen}
           setIsOpen={setIsSidebarOpen}
-          productsCount={products.length}
-          categoriesCount={categories.length}
-          categories={categories}
-          stores={stores}
           currentUser={currentUser}
         />
 
@@ -1376,8 +1194,6 @@ export default function App() {
                   {selectedStoreDetail ? (
                     <StoreDetailPage 
                       store={selectedStoreDetail}
-                      products={products}
-                      categories={categories}
                       currentUser={currentUser}
                       onBack={() => setSelectedStoreDetail(null)}
                       onEditStore={(st) => {
@@ -1405,7 +1221,6 @@ export default function App() {
                       {/* 1. Main Overview Dashboard (بيانات عامة للموقع بدون عرض متاجر أو منتجات) */}
                       {activeTab === 'dashboard' && (
                         <DashboardOverview 
-                          orders={orders}
                           onNavigateToFinancial={() => setActiveTab('financial')}
                           onNavigateToDelivery={() => setActiveTab('delivery')}
                           onNavigateToGlobalStores={() => setActiveTab('global_stores')}
@@ -1420,13 +1235,9 @@ export default function App() {
                         />
                       )}
 
-                      {/* 2. Dedicated Categories & Services Management View (صفحة إدارة الفئات والخدمات المنفصلة) */}
-                      {activeTab === 'categories' && (
-                        <CategoriesManager 
-                          categories={categories}
-                          stores={stores}
-                          products={products}
-                          isLoading={isLoadingCategories}
+                      {/* 2. Unified Nested Business Catalog Manager (إدارة الأنشطة التجارية: فئات -> متاجر -> منتجات) */}
+                      {(activeTab === 'restaurants' || activeTab === 'categories' || activeTab === 'products') && (
+                        <BusinessCatalogManager 
                           onAddCategory={() => {
                             setEditingCategory(null);
                             setIsCategoryModalOpen(true);
@@ -1436,23 +1247,42 @@ export default function App() {
                             setIsCategoryModalOpen(true);
                           }}
                           onDeleteCategory={handleDeleteCategory}
-                          onToggleStatus={handleToggleCategoryStatus}
-                          onSeedData={handleSeedData}
-                          onNavigateToStores={(categoryId) => {
-                            if (categoryId) setSelectedCategoryFilter(categoryId);
-                            setActiveTab('restaurants');
+                          onToggleCategoryStatus={handleToggleCategoryStatus}
+                          onAddStore={(initialCatId) => {
+                            setEditingStore(null);
+                            if (initialCatId) setSelectedCategoryFilter(initialCatId);
+                            setIsStoreModalOpen(true);
                           }}
+                          onEditStore={(st) => {
+                            setEditingStore(st);
+                            setIsStoreModalOpen(true);
+                          }}
+                          onDeleteStore={handleDeleteStore}
+                          onToggleStoreStatus={handleToggleStoreStatus}
+                          onUpdateStoreSections={handleUpdateStoreSections}
+                          onAddProductForStore={(stId, secName) => {
+                            setEditingProduct(null);
+                            setInitialStoreIdForModal(stId);
+                            setInitialSectionForModal(secName);
+                            setIsProductModalOpen(true);
+                          }}
+                          onEditProduct={(p) => {
+                            setEditingProduct(p);
+                            setInitialStoreIdForModal(undefined);
+                            setInitialSectionForModal(undefined);
+                            setIsProductModalOpen(true);
+                          }}
+                          onDeleteProduct={handleDeleteProduct}
+                          onToggleProductInStock={handleToggleProductInStock}
                           currentUser={currentUser}
+                          initialCategoryId={selectedCategoryFilter}
+                          initialStoreId={selectedStoreDetail?.id}
                         />
                       )}
 
                       {/* 2b. Stores & Restaurants View */}
                       {activeTab === 'restaurants' && (
                         <StoresManager 
-                          stores={stores}
-                          categories={categories}
-                          products={products}
-                          isLoading={isLoadingStores}
                           selectedCategoryFilter={selectedCategoryFilter}
                           onSelectCategoryFilter={(filter) => setSelectedCategoryFilter(filter)}
                           onNavigateToCategories={() => setActiveTab('categories')}
@@ -1482,10 +1312,6 @@ export default function App() {
                   {/* 3. Products View */}
                   {activeTab === 'products' && (
                     <ProductsManager 
-                      products={products}
-                      categories={categories}
-                      stores={stores}
-                      isLoading={isLoadingProducts}
                       onAddProduct={() => {
                         setEditingProduct(null);
                         setIsProductModalOpen(true);
@@ -1507,9 +1333,6 @@ export default function App() {
                   {/* 4. Users & RBAC Permissions View */}
                   {activeTab === 'admin' && (
                     <AdminUsersManager 
-                      users={adminUsers}
-                      stores={stores}
-                      isLoading={isLoadingUsers}
                       onAddUser={() => {
                         setEditingUser(null);
                         setIsUserModalOpen(true);
@@ -1527,11 +1350,7 @@ export default function App() {
                   {/* 6. Orders Management View */}
                   {activeTab === 'orders' && (
                     <OrdersManager 
-                      orders={orders}
-                      stores={stores}
-                      categories={categories}
                       currentUser={currentUser}
-                      isLoading={isLoadingOrders}
                       onUpdateOrderStatus={handleUpdateOrderStatus}
                       onCreateOrder={handleCreateOrder}
                       onSeedOrders={handleSeedData}
@@ -1541,8 +1360,6 @@ export default function App() {
                   {/* 7. System Audit Logs & Monitoring View */}
                   {activeTab === 'audit' && (
                     <AuditLogsManager 
-                      logs={auditLogs}
-                      isLoading={isLoadingAudit}
                       currentUser={currentUser}
                     />
                   )}
@@ -1558,10 +1375,7 @@ export default function App() {
                   {/* 8b. Fazaa Orders & Fleet Management View */}
                   {activeTab === 'fazaa' && (
                     <FazaaOrdersManager 
-                      orders={fazaaOrders}
-                      categories={fazaaCategories}
                       currentUser={currentUser}
-                      isLoading={isLoadingFazaa}
                       onCreateOrder={handleCreateFazaaOrder}
                       onUpdateOrderStatus={handleUpdateFazaaOrderStatus}
                       onCreateCategory={handleSaveFazaaCategory}
@@ -1571,9 +1385,7 @@ export default function App() {
                   {/* 9. App Customers & User Profiles View */}
                   {activeTab === 'customers' && (
                     <AppUsersManager 
-                      users={appUsers}
                       currentUser={currentUser}
-                      isLoading={isLoadingAppUsers}
                       onSaveUser={handleSaveAppUser}
                     />
                   )}
@@ -1581,9 +1393,26 @@ export default function App() {
                   {/* 9b. Driver Invoices & Receipts Gallery View */}
                   {activeTab === 'invoices' && (
                     <InvoicesManager
-                      drivers={drivers}
                       currentUser={currentUser}
                       onShowToast={showToast}
+                    />
+                  )}
+
+                  {/* 10. Categories View */}
+                  {activeTab === 'categories' && (
+                    <CategoriesManager 
+                      onAddCategory={() => {
+                        setEditingCategory(null);
+                        setIsCategoryModalOpen(true);
+                      }}
+                      onEditCategory={(cat) => {
+                        setEditingCategory(cat);
+                        setIsCategoryModalOpen(true);
+                      }}
+                      onDeleteCategory={handleDeleteCategory}
+                      onToggleStatus={handleToggleCategoryStatus}
+                      onSeedData={handleSeedData}
+                      currentUser={currentUser}
                     />
                   )}
 

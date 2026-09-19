@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   ShoppingBag, 
   Clock, 
@@ -40,7 +40,8 @@ import {
   Globe,
   PhoneCall,
   Tag,
-  ExternalLink
+  ExternalLink,
+  Trash2
 } from 'lucide-react';
 import { Order, OrderStatus, Store, Category, AdminUser, DriverUser, VehicleType } from '../types';
 import { hasModulePermission } from '../lib/permissions';
@@ -60,6 +61,8 @@ import { calculateRoadDistance, calculateDeliveryCost, estimateRoadDistanceByAdd
 import { TestOrderModal } from './TestOrderModal';
 import { DistanceVerificationModal } from './DistanceVerificationModal';
 import { getUnifiedStores } from '../lib/globalStoreService';
+import { OrderSkeleton } from './SkeletonLoader';
+import { OrderDetailModal } from './OrderDetailModal';
 
 export { ORDER_STATUS_CONFIG };
 
@@ -104,11 +107,11 @@ const DEFAULT_DRIVERS: DriverUser[] = [
 ];
 
 interface OrdersManagerProps {
-  orders: Order[];
-  stores: Store[];
+  orders?: Order[];
+  stores?: Store[];
   categories?: Category[];
   currentUser: AdminUser | null;
-  isLoading: boolean;
+  isLoading?: boolean;
   onUpdateOrderStatus: (orderId: string, newStatus: OrderStatus, extraData?: Partial<Order>) => Promise<void>;
   onCreateOrder?: (orderData: Partial<Order>) => Promise<void>;
   onSeedOrders?: () => Promise<void>;
@@ -119,7 +122,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   stores = [],
   categories = [],
   currentUser,
-  isLoading,
+  isLoading = false,
   onUpdateOrderStatus,
   onCreateOrder,
   onSeedOrders
@@ -135,6 +138,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [storeTypeFilter, setStoreTypeFilter] = useState<'all' | 'local' | 'global'>('all');
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
+  const [selectedDetailOrder, setSelectedDetailOrder] = useState<Order | null>(null);
 
   // Driver Assignment Modal State
   const [isAssignDriverModalOpen, setIsAssignDriverModalOpen] = useState(false);
@@ -177,6 +181,10 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const [newNotes, setNewNotes] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [finalPriceInput, setFinalPriceInput] = useState<Record<string, string>>({});
+
+  // Debouncing & double-assignment prevention refs
+  const isAssigningRef = useRef(false);
+  const lastAssignedRef = useRef<{ orderId: string; driverId: string; time: number } | null>(null);
 
   // Authorization check
   const canEditOrders = hasModulePermission(currentUser, 'orders', 'edit');
@@ -286,16 +294,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
-  // Realtime Orders Listener from Firestore 'orders' collection
-  const [liveOrders, setLiveOrders] = useState<Order[]>(orders);
+  // Realtime Data Listeners from Firestore with component-level unmount cleanup
+  const [liveOrders, setLiveOrders] = useState<Order[]>(orders || []);
+  const [internalStores, setInternalStores] = useState<Store[]>(stores || []);
+  const [internalCategories, setInternalCategories] = useState<Category[]>(categories || []);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(isLoading !== undefined ? isLoading : true);
 
   useEffect(() => {
-    let unsubscribe: any;
+    let unsubscribeOrders: (() => void) | undefined;
+    let unsubscribeStores: (() => void) | undefined;
+    let unsubscribeCats: (() => void) | undefined;
+    let unsubscribeDrivers: (() => void) | undefined;
+
     try {
+      setIsComponentLoading(true);
+
       // 1. Initial & Periodical API sync (to fetch orders placed via Mobile Client REST API)
       const fetchApiOrders = async () => {
-        let unsubscribe: any;
-    try {
+        try {
           const res = await fetch('/api/orders');
           if (res.ok) {
             const data = await res.json();
@@ -314,8 +330,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       };
       fetchApiOrders();
 
+      // 2. Component-level real-time snapshot listener for orders
       const ordersQuery = query(collection(db, 'orders'));
-      unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+      unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
         const list: Order[] = snapshot.docs.map(docSnap => {
           const data = docSnap.data();
           const isGlobal = Boolean(
@@ -399,12 +416,42 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
         // Set live orders directly from Firestore snapshot without stale localStorage
         setLiveOrders(list);
+        setIsComponentLoading(false);
       }, (err) => {
         console.warn('Orders onSnapshot error in OrdersManager:', err);
+        setIsComponentLoading(false);
+      });
+
+      // 3. Component-level real-time snapshot listener for stores
+      const storesQuery = query(collection(db, 'stores'));
+      unsubscribeStores = onSnapshot(storesQuery, (snapshot) => {
+        const sList: Store[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Store[];
+        setInternalStores(sList);
+      }, (err) => {
+        console.warn('Stores snapshot error in OrdersManager:', err);
+      });
+
+      // 4. Component-level real-time snapshot listener for categories
+      const catsQuery = query(collection(db, 'categories'));
+      unsubscribeCats = onSnapshot(catsQuery, (snapshot) => {
+        const cList: Category[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Category[];
+        setInternalCategories(cList);
+      }, (err) => {
+        console.warn('Categories snapshot error in OrdersManager:', err);
+      });
+
+      // 5. Component-level real-time snapshot listener for drivers
+      const driversQuery = query(collection(db, 'drivers'));
+      unsubscribeDrivers = onSnapshot(driversQuery, (snapshot) => {
+        const dList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as DriverUser[];
+        if (dList.length > 0) setDrivers(dList);
+      }, (err) => {
+        console.warn('Drivers snapshot error in OrdersManager:', err);
       });
 
     } catch (e) {
-      console.warn('Orders listener setup error in OrdersManager:', e);
+      console.warn('Data listeners setup error in OrdersManager:', e);
+      setIsComponentLoading(false);
     }
 
     // Window event listener for immediately placed orders
@@ -420,18 +467,34 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       }
     };
     window.addEventListener('jahez_order_placed', handleOrderPlaced);
+
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeOrders) unsubscribeOrders();
+      if (unsubscribeStores) unsubscribeStores();
+      if (unsubscribeCats) unsubscribeCats();
+      if (unsubscribeDrivers) unsubscribeDrivers();
       window.removeEventListener('jahez_order_placed', handleOrderPlaced);
     };
   }, []);
 
   // Sync prop changes when passed from App
   useEffect(() => {
-    if (orders) {
+    if (orders && orders.length > 0) {
       setLiveOrders(orders);
     }
   }, [orders]);
+
+  useEffect(() => {
+    if (stores && stores.length > 0) {
+      setInternalStores(stores);
+    }
+  }, [stores]);
+
+  useEffect(() => {
+    if (categories && categories.length > 0) {
+      setInternalCategories(categories);
+    }
+  }, [categories]);
 
   const safeOrders = useMemo(() => {
     const raw = liveOrders.length > 0 ? liveOrders : (orders || []);
@@ -442,16 +505,21 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     });
     return Array.from(uniqueMap.values());
   }, [liveOrders, orders]);
-  const safeStores = useMemo(() => getUnifiedStores(stores || []), [stores]);
+  const safeStores = useMemo(() => {
+    const storeList = internalStores.length > 0 ? internalStores : (stores || []);
+    return getUnifiedStores(storeList);
+  }, [internalStores, stores]);
+
   const safeCategories = useMemo(() => {
-    const merged = [...(categories || [])];
+    const catList = internalCategories.length > 0 ? internalCategories : (categories || []);
+    const merged = [...catList];
     INITIAL_CATEGORIES.forEach(initCat => {
       if (!merged.some(c => c.id === initCat.id || c.name === initCat.name)) {
         merged.push(initCat as any);
       }
     });
     return merged;
-  }, [categories]);
+  }, [internalCategories, categories]);
 
   const isOrderGlobal = (order: Order) => Boolean(
     order.orderType === 'global_store' ||
@@ -709,21 +777,6 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   }, [safeOrders]);
 
   // Handler for Admin status change
-  
-  const handleDeleteOrder = async (orderId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الطلب نهائياً؟ لا يمكن التراجع عن هذا الإجراء.')) return;
-    try {
-      if (!orderId.startsWith('local-')) {
-        await deleteDoc(doc(db, 'orders', orderId));
-      }
-      setLiveOrders(prev => prev.filter(o => o.id !== orderId));
-      
-    } catch (err: any) {
-      console.error('Failed to delete order:', err);
-      alert('فشل حذف الطلب');
-    }
-  };
-
   const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
     if (!canEditOrders) return;
 
@@ -768,6 +821,34 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   };
 
   // Handler for Admin to confirm order after calling the customer
+  const handleCancelOrderWithConfirm = (order: Order) => {
+    if (!canCancelOrders) {
+      alert('عفواً، صلاحية إلغاء الطلب مخصصة حصراً لمدراء النظام والإدارة الرسمية.');
+      return;
+    }
+    if (window.confirm(`هل أنت متأكد من إلغاء الطلب رقم ${order.orderNumber || order.id.slice(0, 6)}؟`)) {
+      handleStatusChange(order.id, 'cancelled');
+    }
+  };
+
+  // Handler for Admin to delete order permanently from Firestore
+  const handleDeleteOrder = async (orderId: string) => {
+    if (window.confirm('هل أنت متأكد من حذف هذا الطلب نهائياً؟')) {
+      try {
+        setUpdatingOrderId(orderId);
+        if (!orderId.startsWith('local-')) {
+          await deleteDoc(doc(db, "orders", orderId));
+        }
+        setLiveOrders(prev => prev.filter(o => o.id !== orderId));
+      } catch (err: any) {
+        console.error('Failed to delete order from Firestore:', err);
+        alert(`فشل حذف الطلب: ${err?.message || 'يرجى المحاولة مجدداً'}`);
+      } finally {
+        setUpdatingOrderId(null);
+      }
+    }
+  };
+
   const handleConfirmOrderAfterCall = async (order: Order) => {
     if (!canEditOrders) return;
     try {
@@ -867,37 +948,75 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   };
 
-  // Handler when Admin assigns a driver and accepts order
+  // Handler when Admin assigns a driver and accepts order (with debouncing & duplicate assignment prevention)
   const handleAssignDriverSubmit = async (driver: DriverUser) => {
     if (!orderToAssign) return;
-    
-    // Prevent double assignment
+
+    // 1. Debounce in-flight lock: prevent clicking multiple times concurrently
+    if (isAssigningRef.current) {
+      console.warn('Driver assignment already in progress, ignoring duplicate submit.');
+      return;
+    }
+
+    const targetDriverPhone = (driver.phone || '').trim();
+    const targetDriverName = (driver.name || '').trim();
+    const targetDriverId = (driver.id || targetDriverPhone).trim();
+
+    // 2. Prevent sending the exact same order to the same driver in the same moment (within 5 seconds)
+    const now = Date.now();
+    if (
+      lastAssignedRef.current &&
+      lastAssignedRef.current.orderId === orderToAssign.id &&
+      (lastAssignedRef.current.driverId === targetDriverId || lastAssignedRef.current.driverId === targetDriverPhone) &&
+      now - lastAssignedRef.current.time < 5000
+    ) {
+      alert('تم إرسال هذا الطلب لنفس المندوب للتو. يرجى الانتظار بضع ثوانٍ لمنع تكرار الإشعار.');
+      return;
+    }
+
+    // 3. Check if the order is already assigned to this driver
+    if (
+      (orderToAssign.driverId === targetDriverPhone || orderToAssign.driverId === targetDriverId || orderToAssign.driverPhone === targetDriverPhone) &&
+      (orderToAssign.status === 'preparing' || orderToAssign.status === 'delivering')
+    ) {
+      alert('هذا الطلب مسند بالفعل لهذا المندوب.');
+      return;
+    }
+
+    // 4. Check if driver is already busy with another active order
     const isBusy = liveOrders.some(o => 
       o.id !== orderToAssign.id &&
-      (o.driverId === driver.phone || o.driverPhone === driver.phone || o.driverId === driver.id) &&
+      (o.driverId === targetDriverPhone || o.driverPhone === targetDriverPhone || o.driverId === targetDriverId) &&
       (o.status === 'preparing' || o.status === 'delivering' || o.status === 'PREPARING' || o.status === 'DELIVERING')
     );
 
     if (isBusy) {
-      alert('هذا المندوب مشغول بتوصيل طلب حالي. لا يمكن إسناد طلبين في نفس الوقت.');
-      return;
+      if (!window.confirm('تنبيه: هذا المندوب لديه طلب آخر قيد التوصيل حالياً. هل ترغب بالتأكيد وتعيينه لهذا الطلب أيضاً؟')) {
+        return;
+      }
     }
 
     try {
+      isAssigningRef.current = true;
+      lastAssignedRef.current = {
+        orderId: orderToAssign.id,
+        driverId: targetDriverPhone || targetDriverId,
+        time: now
+      };
       setUpdatingOrderId(orderToAssign.id);
 
-      const targetDriverPhone = (driver.phone || '').trim();
-      const targetDriverName = (driver.name || '').trim();
+      const nowIso = new Date().toISOString();
 
       // 1. Direct update to orders/{orderId} in Firestore exactly as expected by driver app
       if (!orderToAssign.id.startsWith('local-')) {
-        await setDoc(doc(db, 'orders', orderToAssign.id), {
-          driverId: targetDriverPhone, // إجبار استخدام رقم الهاتف كمعرف صريح
+        await updateDoc(doc(db, 'orders', orderToAssign.id), {
+          driverId: targetDriverPhone,
           driverName: targetDriverName,
           driverPhone: targetDriverPhone,
           status: 'preparing',
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+          assignedAt: nowIso,
+          updatedAt: nowIso
+        });
       }
 
       // 2. Trigger global App callback
@@ -905,16 +1024,18 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         driverId: targetDriverPhone,
         driverName: targetDriverName,
         driverPhone: targetDriverPhone,
-        status: 'preparing'
+        status: 'preparing',
+        assignedAt: nowIso
       });
 
-      // Update local state directly
+      // 3. Update local state directly
       setLiveOrders(prev => prev.map(o => o.id === orderToAssign.id ? {
         ...o,
         driverId: targetDriverPhone,
         driverName: targetDriverName,
         driverPhone: targetDriverPhone,
-        status: 'preparing'
+        status: 'preparing',
+        assignedAt: nowIso
       } : o));
 
       setIsAssignDriverModalOpen(false);
@@ -923,6 +1044,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
       console.error('Failed assigning driver:', err);
       alert(`فشل إسناد المندوب وحفظ الطلب في السيرفر: ${err?.message || 'يرجى المحاولة مجدداً'}`);
     } finally {
+      isAssigningRef.current = false;
       setUpdatingOrderId(null);
     }
   };
@@ -1292,9 +1414,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   onChange={(e) => setSelectedCategoryId(e.target.value)}
                   className="w-full md:w-48 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="all">جميع الفئات والأنشطة ({safeCategories.length})</option>
-                  {safeCategories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  <option key="cat-all" value="all">جميع الفئات والأنشطة ({safeCategories.length})</option>
+                  {safeCategories.map((cat, idx) => (
+                    <option key={cat.id || `cat-${idx}`} value={cat.id}>{cat.name}</option>
                   ))}
                 </select>
               </div>
@@ -1307,9 +1429,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   onChange={(e) => setSelectedStoreId(e.target.value)}
                   className="w-full md:w-52 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="all">جميع المتاجر والمطاعم</option>
-                  {safeStores.map(st => (
-                    <option key={st.id} value={st.id}>{st.name}</option>
+                  <option key="store-all" value="all">جميع المتاجر والمطاعم</option>
+                  {safeStores.map((st, idx) => (
+                    <option key={st.id || `st-${idx}`} value={st.id}>{st.name}</option>
                   ))}
                 </select>
               </div>
@@ -1371,10 +1493,11 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           </div>
 
           {/* Orders List Grid */}
-          {isLoading ? (
-            <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
-              <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-              <p className="text-xs font-bold text-slate-600">جاري تحميل وتحديث الطلبات مباشرة من Firestore...</p>
+          {(isLoading || isComponentLoading) && safeOrders.length === 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {[...Array(6)].map((_, i) => (
+                <OrderSkeleton key={i} />
+              ))}
             </div>
           ) : filteredOrders.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center space-y-3">
@@ -1385,522 +1508,158 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredOrders.map((order) => {
-                const rawStatus = order.status;
-                  const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
-                  const StatusIcon = statusConfig.Icon;
+                const rawStatus = (order.status || 'new').toLowerCase();
+                const statusConfig = ORDER_STATUS_CONFIG[rawStatus] || ORDER_STATUS_CONFIG.new;
+                const StatusIcon = statusConfig.Icon;
 
-                  const isGlobalOrder = Boolean(
-                    order.orderType === 'global_store' ||
-                    order.orderType?.includes('global_store') ||
-                    order.orderType?.includes('متجر عالمي') ||
-                    order.orderScope === 'international' ||
-                    order.serviceType === 'global_store' ||
-                    order.isGlobalStore ||
-                    (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
-                  );
+                const isNew = rawStatus === 'new' || rawStatus === 'pending' || rawStatus === 'pending_review' || Boolean(order.needsAdminReview) || (!order.driverId && !order.driverName);
+                const hasDriverAssigned = Boolean(order.driverId || order.driverName);
+                const isCompleted = rawStatus === 'delivered' || rawStatus === 'completed';
+                const isCancelled = rawStatus === 'cancelled';
 
-                  return (
-                    <div 
-                      key={order.id}
-                      className={`bg-white rounded-2xl border ${statusConfig.borderColor} shadow-xs hover:shadow-md transition-all overflow-hidden flex flex-col justify-between`}
-                    >
-                    {/* Card Header */}
-                    <div className="p-4 bg-slate-50/60 border-b border-gray-100 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="font-mono font-extrabold text-sm text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
-                          {order.orderNumber || `#${order.id.slice(0, 6)}`}
-                        </span>
-                        <div>
-                          <span className="text-xs font-bold text-slate-800 block">
-                            {isGlobalOrder ? (
-                              <span className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-900 border border-indigo-200 px-2 py-0.5 rounded-lg font-bold">
-                                <Globe className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                <span>طلب متجر عالمي</span>
-                                {order.items && order.items.length > 0 && order.items[0]?.storeName && (
-                                  <span className="text-[10px] text-indigo-700 bg-white px-1.5 py-0.2 rounded border border-indigo-100 font-sans">
-                                    {Array.from(new Set(order.items.map(i => i.storeName).filter(Boolean))).join(' / ') || order.storeName}
-                                  </span>
-                                )}
-                              </span>
-                            ) : (
-                              order.storeName || 'متجر عام'
-                            )}
+                return (
+                  <div 
+                    key={order.id}
+                    className="bg-white rounded-2xl border border-gray-200 hover:border-blue-200 shadow-xs hover:shadow-md transition-all p-4.5 flex flex-col justify-between space-y-3.5"
+                  >
+                    {/* Header: رقم الطلب، اسم المتجر، وشارة الحالة للقراءة فقط */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-extrabold text-xs text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                            {order.orderNumber || `#${order.id.slice(0, 6)}`}
                           </span>
-                          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono mt-0.5">
-                            <Calendar className="w-3 h-3 text-slate-400" />
+                          <span className="text-[11px] text-slate-400 font-mono">
                             {order.createdAt ? new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
                           </span>
                         </div>
+                        <h4 className="font-bold text-slate-900 text-sm truncate" title={order.storeName || 'متجر عام'}>
+                          {order.storeName || 'متجر عام'}
+                        </h4>
                       </div>
 
-                      {/* Read-Only Status Badge */}
-                      <div className="relative">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border ${statusConfig.badgeClass}`}>
-                          <StatusIcon className="w-3.5 h-3.5" />
-                          <span>{statusConfig.label}</span>
-                          {updatingOrderId === order.id && (
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />
-                          )}
-                        </span>
-                      </div>
+                      {/* شارة الحالة النصية للقراءة فقط - لا توجد أي قوائم منسدلة */}
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-xl border shrink-0 ${statusConfig.badgeClass}`}>
+                        <StatusIcon className="w-3.5 h-3.5" />
+                        <span>{statusConfig.label}</span>
+                      </span>
                     </div>
 
-                    {/* Card Body Details */}
-                    {isGlobalOrder ? (
-                      <div className="p-4 space-y-3">
-                        <div className="flex items-center justify-between bg-indigo-50/80 p-3 rounded-xl border border-indigo-100">
-                          <div className="flex items-center gap-2">
-                            <User className="w-4 h-4 text-indigo-700" />
-                            <span className="font-bold text-xs text-indigo-950">{order.customerName}</span>
-                          </div>
-                          {order.customerPhone && (
-                            <a 
-                              href={`tel:${order.customerPhone}`} 
-                              className="bg-white text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border border-emerald-200 shadow-2xs hover:bg-emerald-50 transition-colors"
-                            >
-                              <PhoneCall className="w-3 h-3 text-emerald-600" /> {order.customerPhone}
-                            </a>
-                          )}
+                    {/* Body: اسم العميل ورقم العميل فقط (المعلومات الحيوية للقراءة فقط) */}
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200/60 flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                          <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{order.customerName || 'عميل'}</span>
                         </div>
-
-                        {/* Store Origin Badge */}
-                        <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                          <span className="text-slate-500 font-bold">المتجر المصدر:</span>
-                          <span className="font-bold text-indigo-700 flex items-center gap-1">
-                            <Globe className="w-3.5 h-3.5" />
-                            {order.storeName || 'المتاجر العالمية'}
-                          </span>
-                        </div>
-
-                        {/* Items List */}
-                        <div className="space-y-2">
-                          <span className="text-xs font-bold text-slate-600 block">المنتجات المطلوبة من المتجر الخارجي:</span>
-                          {order.items && order.items.length > 0 ? (
-                            order.items.map((item, idx) => {
-                              const pName = item.product_snapshot?.name || item.product_snapshot?.productName || (item as any).لقطة_المنتج?.name || item.productName || item.name || 'منتج عالمي';
-                              const pUrl = item.product_snapshot?.productUrl || item.product_snapshot?.sourceUrl || (item as any).لقطة_المنتج?.productUrl || item.productUrl || item.sourceUrl || (item as any).url;
-                              const pImg = item.product_snapshot?.imageUrl || (item as any).لقطة_المنتج?.imageUrl || item.imageUrl || item.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=300&q=80';
-                              const specs = item.specs_snapshot || (item as any).لقطة_المواصفات || {};
-                              const sColor = specs.color || item.color;
-                              const sSize = specs.size || item.size;
-
-                              return (
-                                <div key={idx} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-2">
-                                  <div className="flex gap-2.5 items-center">
-                                    <img 
-                                      src={pImg} 
-                                      alt={pName} 
-                                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 shrink-0 bg-white" 
-                                      onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <p className="font-bold text-slate-900 truncate">{pName}</p>
-                                      <p className="text-slate-500 text-[11px] mt-0.5">
-                                        الكمية: <strong className="text-slate-800">{item.quantity || 1}</strong>
-                                        {sColor && ` | اللون: ${sColor}`}
-                                        {sSize && ` | المقاس: ${sSize}`}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  {pUrl && (
-                                    <a 
-                                      href={pUrl} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer" 
-                                      className="flex items-center justify-center gap-1.5 w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-1.5 rounded-lg text-xs font-bold border border-indigo-200 transition-colors"
-                                    >
-                                      <ExternalLink className="w-3.5 h-3.5" />
-                                      <span>فتح رابط المنتج في المتجر الأصلي</span>
-                                    </a>
-                                  )}
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="p-3 bg-slate-50 rounded-xl text-center text-slate-500 text-xs">
-                              طلب متجر عالمي بانتظار تسعير ومراجعة الإدارة
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Confirmation & Final Price */}
-                        <div className="space-y-2 pt-2 border-t border-slate-200">
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="number" 
-                              placeholder="أدخل السعر النهائي المعتمد (ر.ي)" 
-                              className="w-full text-xs p-2.5 border rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white"
-                              value={finalPriceInput[order.id] || ''}
-                              onChange={(e) => setFinalPriceInput({...finalPriceInput, [order.id]: e.target.value})}
-                            />
-                            <button 
-                              onClick={() => handleConfirmGlobalOrder(order)}
-                              disabled={updatingOrderId === order.id}
-                              className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                            >
-                              {updatingOrderId === order.id ? 'جاري...' : 'تأكيد هاتفياً 📞'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 space-y-3 flex-1">
-                        {/* Customer & Phone with Admin Call Action */}
-                        <div className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <User className="w-4 h-4 text-slate-400" />
-                            <span className="font-bold text-slate-900">{order.customerName}</span>
-                          </div>
-                          {order.customerPhone && (
-                            <a 
-                              href={`tel:${order.customerPhone}`}
-                              className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1.5 dir-ltr transition-colors border border-blue-200"
-                              title="التواصل مع العميل لتأكيد الطلب"
-                            >
-                              <Phone className="w-3 h-3 text-blue-600" />
-                              <span>{order.customerPhone}</span>
-                              <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded font-sans">تأكيد 📞</span>
-                            </a>
-                          )}
-                        </div>
-
-                      {/* Driver & Invoice Info Badge */}
-                      <div className="bg-purple-50/70 p-2.5 rounded-xl border border-purple-200 text-xs space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-purple-900 flex items-center gap-1">
-                            <Truck className="w-3.5 h-3.5 text-purple-700" />
-                            <span>المندوب المسند:</span>
-                          </span>
-                          {order.driverName ? (
-                            <span className="font-bold text-purple-950 bg-white px-2 py-0.5 rounded border border-purple-200">
-                              {order.driverName} ({order.driverPhone || 'بدون هاتف'})
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setOrderToAssign(order);
-                                setIsAssignDriverModalOpen(true);
-                              }}
-                              className="text-[11px] bg-purple-600 hover:bg-purple-700 text-white font-bold px-2.5 py-1 rounded-lg transition-all"
-                            >
-                              + اختيار كابتن توصيل
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Invoice Number Status */}
-                        <div className="flex items-center justify-between border-t border-purple-200/60 pt-1.5 text-[11px]">
-                          <span className="font-bold text-slate-700 flex items-center gap-1">
-                            <Receipt className="w-3.5 h-3.5 text-slate-500" />
-                            <span>رقم الفاتورة المسجل:</span>
-                          </span>
-                          {order.invoiceNumber ? (
-                            <span className="font-mono font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                              {order.invoiceNumber} ✅
-                            </span>
-                          ) : (
-                            <span className="text-amber-800 bg-amber-100 px-2 py-0.5 rounded font-bold border border-amber-200">
-                              بانتظار إدخال الكابتن للفاتورة ⏳
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Items List Summary */}
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-bold text-slate-400 block">الأصناف المطلوبة ({order.itemsCount || order.items?.length || 1}):</span>
-                        {order.items && order.items.length > 0 ? (
-                          <div className="space-y-2 bg-gray-50/70 p-2.5 rounded-xl border border-gray-100">
-                            {order.items.map((it, idx) => {
-                              const prodName = it.product_snapshot?.name || it.product_snapshot?.productName || (it as any).لقطة_المنتج?.name || it.productName || it.name;
-                              const prodUrl = it.product_snapshot?.productUrl || it.product_snapshot?.sourceUrl || (it as any).لقطة_المنتج?.productUrl || it.productUrl || it.sourceUrl;
-                              const prodImg = it.product_snapshot?.imageUrl || (it as any).لقطة_المنتج?.imageUrl || it.imageUrl;
-                              const specs = it.specs_snapshot || (it as any).لقطة_المواصفات || {};
-                              const size = specs.size || it.size;
-                              const color = specs.color || it.color;
-                              const itemTotal = it.totalPrice || ((it.price || 0) * (it.quantity || 1));
-
-                              return (
-                                <div key={idx} className="flex items-start justify-between text-xs text-slate-700 gap-2 border-b border-gray-100/60 pb-1.5 last:border-b-0 last:pb-0">
-                                  <div className="flex items-start gap-2 flex-1 min-w-0">
-                                    {prodImg && (
-                                      <img 
-                                        src={prodImg} 
-                                        alt={prodName} 
-                                        className="w-8 h-8 rounded-lg object-cover border border-gray-200 shrink-0 mt-0.5"
-                                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                                      />
-                                    )}
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="font-bold text-blue-600 shrink-0">{it.quantity || 1}x</span>
-                                        <span className="font-medium text-slate-900 leading-snug">{prodName}</span>
-                                        {prodUrl && (
-                                          <a 
-                                            href={prodUrl} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer" 
-                                            className="text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0"
-                                            title="عرض المنتج في المتجر الأصلي"
-                                          >
-                                            <span>الرابط</span>
-                                            <ExternalLink className="w-2.5 h-2.5" />
-                                          </a>
-                                        )}
-                                      </div>
-                                      {(size || color || (it.options && it.options.length > 0)) && (
-                                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[10px] text-slate-500">
-                                          {size && <span className="bg-slate-100 px-1.5 py-0.2 rounded font-mono">المقاس: {size}</span>}
-                                          {color && <span className="bg-slate-100 px-1.5 py-0.2 rounded">اللون: {color}</span>}
-                                          {it.options && it.options.length > 0 && <span>({it.options.join(', ')})</span>}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <span className="font-bold font-mono text-slate-800 shrink-0">{itemTotal.toLocaleString()} ر.ي</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-slate-600 font-medium bg-gray-50 p-2 rounded-lg">
-                            طلب منتجات من {order.storeName || 'المتجر'} (إجمالي: {order.total?.toLocaleString()} ر.ي)
-                          </div>
+                        {order.customerPhone && (
+                          <a 
+                            href={`tel:${order.customerPhone}`}
+                            className="text-[11px] text-blue-600 hover:text-blue-800 font-mono font-bold flex items-center gap-1 mt-1 transition-colors w-fit"
+                          >
+                            <PhoneCall className="w-3 h-3 text-blue-500" />
+                            <span>{order.customerPhone}</span>
+                          </a>
                         )}
                       </div>
 
-                      {/* Address */}
-                      {order.address && (
-                        <div className="flex items-start gap-1.5 text-xs text-slate-600">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                          <span className="line-clamp-1">{order.address}</span>
-                        </div>
-                      )}
-
-                      {/* Real-world Road Distance vs Global Store International Shipping (UI Fallback) */}
-                      {isGlobalOrder ? (
-                        <div className="flex items-center justify-between bg-indigo-50/80 p-2.5 rounded-xl border border-indigo-200 text-xs">
-                          <div className="flex items-center gap-1.5 text-indigo-900">
-                            <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
-                            <span className="font-bold">شحن ومناولة دولية:</span>
-                            <span className="text-slate-600 text-[11px]">مستودعات الشحن الخارجي ✈️ ⬅ توصيل لعنوان العميل</span>
-                          </div>
-                          <span className="text-[10px] bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-md">
-                            شحن عالمي
+                      {order.driverName && (
+                        <div className="text-left shrink-0">
+                          <span className="text-[10px] text-slate-400 block font-sans">الكابتن المعين</span>
+                          <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 inline-flex items-center gap-1">
+                            <Truck className="w-3 h-3 text-purple-600" />
+                            <span className="truncate max-w-[90px]">{order.driverName}</span>
                           </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between bg-blue-50/80 p-2.5 rounded-xl border border-blue-200 text-xs">
-                          <div className="flex items-center gap-1.5">
-                            <Navigation className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                            <span className="text-slate-700 font-medium">المسافة الطرقية:</span>
-                            <strong className="font-mono text-blue-900 font-extrabold text-xs">
-                              {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم` : '3.5 كم'}
-                            </strong>
-                            {order.airDistanceKm && (
-                              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                                ({order.airDistanceKm} كم خط هوائي)
-                              </span>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setVerificationOrder(order)}
-                            className="bg-white hover:bg-blue-600 hover:text-white text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs cursor-pointer shrink-0"
-                            title="معاينة مسار الشوارع الفعلي ونقطتي المتجر والعميل ومطابقة المسافة"
-                          >
-                            <MapPin className="w-3 h-3 text-blue-500 hover:text-white" />
-                            <span>📍 معاينة النقطتين على الخريطة</span>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Admin Confirmation Action (Phone Call Workflow) */}
-                      {canEditOrders && (
-                        <div className="bg-emerald-50 border border-emerald-300 p-3 rounded-xl space-y-2">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-emerald-950 flex items-center gap-1.5">
-                              <PhoneCall className="w-4 h-4 text-emerald-600 animate-pulse" />
-                              <span>تأكيد الإدارة بعد الاتصال بالعميل</span>
-                            </span>
-                            {order.confirmedByAdminAt ? (
-                              <span className="text-[10px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-md font-bold">
-                                تم التأكيد هاتفياً ✅
-                              </span>
-                            ) : (
-                              <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-bold">
-                                بانتظار التأكيد 📞
-                              </span>
-                            )}
-                          </div>
-                          
-                          {!order.confirmedByAdminAt && (
-                            <button
-                              type="button"
-                              disabled={updatingOrderId === order.id}
-                              onClick={() => handleConfirmOrderAfterCall(order)}
-                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs py-2.5 px-3.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs hover:shadow cursor-pointer"
-                              title="تأكيد تفاصيل الطلب مع العميل ونقله للمرحلة التالية"
-                            >
-                              {updatingOrderId === order.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                              ) : (
-                                <PhoneCall className="w-4 h-4 text-emerald-100" />
-                              )}
-                              <span>تأكيد الطلب بعد الاتصال بالعميل</span>
-                            </button>
-                          )}
-
-                          {order.confirmedByAdminAt && (
-                            <p className="text-[11px] text-emerald-800">
-                              تم تأكيد الطلب هاتفياً بواسطة <strong>{order.confirmedByAdminName || 'الإدارة'}</strong> في {new Date(order.confirmedByAdminAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}.
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Review & Vehicle Assignment Prominent Banner */}
-                      {(order.needsAdminReview || rawStatus === 'pending_review' || order.status === 'PENDING_REVIEW') && (
-                        <div className="bg-amber-50 border border-amber-300 p-3 rounded-xl text-xs space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-amber-950 flex items-center gap-1.5">
-                              <Sliders className="w-4 h-4 text-amber-600 animate-pulse" />
-                              <span>طلب بانتظار مراجعة المنتجات واعتماد وسيلة النقل</span>
-                            </span>
-                            <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-bold">
-                              مراجعة الإدارة
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-amber-800">
-                            يتطلب هذا الطلب مراجعة الأصناف واختيار وسيلة النقل الملائمة لحساب تكلفة التوصيل الواقعية بدقة قبل التأكيد.
-                          </p>
-                          {canEditOrders && (
-                            <button
-                              onClick={() => handleOpenReviewModal(order)}
-                              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
-                            >
-                              <ClipboardCheck className="w-4 h-4" />
-                              <span>مراجعة الطلب واختيار وسيلة النقل واعتماد السعر 🚗</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Admin Approved Vehicle Badge */}
-                      {order.reviewedByAdmin && (
-                        <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-emerald-900 flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>تم اعتماد وسيلة النقل: {order.vehicleTypeName || 'دراجة نارية'}</span>
-                            </span>
-                            <span className="font-mono font-bold text-emerald-800">
-                              {order.actualRoadDistanceKm ? `${order.actualRoadDistanceKm} كم مسار فعلي` : ''}
-                            </span>
-                          </div>
-                          <div className="text-emerald-700 text-[10px]">
-                            تكلفة التوصيل المعتمدة: <strong>{(order.deliveryFee || 500).toLocaleString()} ر.ي</strong>
-                            {order.adminReviewNotes && ` • ملاحظة: ${order.adminReviewNotes}`}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Cancellation Policy Badge */}
-                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] flex items-center justify-between">
-                        <span className="font-bold text-slate-700">صلاحية الإلغاء:</span>
-                        <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded font-bold border border-amber-200 flex items-center gap-1">
-                          <ShieldAlert className="w-3 h-3 text-amber-600" />
-                          <span>عبر الإدارة فقط بالتواصل مع العميل</span>
-                        </span>
-                      </div>
-
-                      {/* Admin Workflow Actions */}
-                      {canEditOrders && (
-                        <div className="pt-1 flex flex-wrap gap-1.5">
-                          {/* Confirm Order (تأكيد الطلب) */}
-                          {rawStatus === 'new' && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, 'preparing')}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] py-2 px-3 rounded-xl transition-all shadow-xs cursor-pointer"
-                            >
-                              تأكيد الطلب ✅
-                            </button>
-                          )}
-
-                          {/* Choose/Assign Driver */}
-                          {(!order.driverId || rawStatus === 'new') && (
-                            <button
-                              onClick={() => {
-                                setOrderToAssign(order);
-                                setIsAssignDriverModalOpen(true);
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] py-2 px-3 rounded-xl transition-all shadow-xs cursor-pointer"
-                            >
-                              اختيار / تعيين المندوب 👨‍🍳
-                            </button>
-                          )}
-
-                          {/* Change Captain */}
-                          {order.driverId && rawStatus !== 'new' && (
-                            <button
-                              onClick={() => {
-                                setOrderToAssign(order);
-                                setIsAssignDriverModalOpen(true);
-                              }}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] py-2 px-2.5 rounded-xl transition-all border border-slate-300 cursor-pointer"
-                            >
-                              تغيير الكابتن
-                            </button>
-                          )}
-                          
-                          {/* Review Items and Pricing */}
-                          <button
-                            onClick={() => handleOpenReviewModal(order)}
-                            className="bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-[11px] py-2 px-2.5 rounded-xl transition-all flex items-center justify-center gap-1 border border-amber-300 cursor-pointer w-full"
-                          >
-                            <Sliders className="w-3.5 h-3.5 text-amber-700" />
-                            <span>مراجعة أصناف الطلب وأتمتة النقل والتسعير</span>
-                          </button>
-
-                          {/* Cancel Order */}
-                          {canCancelOrders && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, 'cancelled')}
-                              className="bg-red-50 hover:bg-red-100 text-red-700 font-bold text-[11px] py-2 px-2.5 rounded-xl border border-red-200 cursor-pointer flex-1"
-                            >
-                              إلغاء الطلب
-                            </button>
-                          )}
-
-                          {/* Delete Order */}
-                          {canCancelOrders && (
-                            <button
-                              onClick={() => handleDeleteOrder(order.id)}
-                              className="bg-red-600 hover:bg-red-700 text-white font-bold text-[11px] py-2 px-2.5 rounded-xl border border-red-700 cursor-pointer flex-1"
-                            >
-                              حذف الطلب 🗑️
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {order.notes && (
-                        <div className="text-[11px] bg-amber-50/80 border border-amber-200 text-amber-900 p-2 rounded-lg font-medium">
-                          ملاحظة العميل: {order.notes}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </>
-    )}
+
+                    {/* الأزرار الحصرية المحددة للطلب */}
+                    <div className="pt-2 border-t border-gray-100 flex flex-col gap-2">
+                      {/* زر مراجعة أصناف الطلب وأتمتة النقل والتسعير */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReviewModal(order)}
+                        className="w-full px-3 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200/70 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                        <span>مراجعة أصناف الطلب وأتمتة النقل والتسعير</span>
+                      </button>
+
+                      {/* أزرار الإسناد وتغيير الكابتن */}
+                      <div className="flex items-center gap-2">
+                        {isNew && !isCancelled && !isCompleted && canEditOrders && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOrderToAssign(order);
+                              setIsAssignDriverModalOpen(true);
+                            }}
+                            className="flex-1 px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>تأكيد واختيار مندوب</span>
+                          </button>
+                        )}
+
+                        {hasDriverAssigned && !isCancelled && !isCompleted && canEditOrders && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOrderToAssign(order);
+                              setIsAssignDriverModalOpen(true);
+                            }}
+                            className="flex-1 px-3 py-2 rounded-xl text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            title="إعادة تعيين أو اختيار مندوب بديل"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                            <span>تغيير الكابتن</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDetailOrder(order)}
+                          className="px-3 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                          title="عرض تفاصيل الفاتورة والعناصر"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-slate-500" />
+                          <span>التفاصيل</span>
+                        </button>
+                      </div>
+
+                      {/* أزرار إلغاء وحذف الطلب */}
+                      <div className="flex items-center gap-2 pt-1 border-t border-dashed border-gray-100">
+                        {!isCancelled && !isCompleted && canCancelOrders && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelOrderWithConfirm(order)}
+                            className="flex-1 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>إلغاء الطلب</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteOrder(order.id)}
+                          className="flex-1 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>حذف الطلب</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
 
       {/* ==================== VIEW MODE 2: DRIVER APP INTERFACE ==================== */}
       {activeViewMode === 'driver' && (
@@ -1933,8 +1692,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   onChange={(e) => setSelectedDriverId(e.target.value)}
                   className="w-full sm:w-64 px-3 py-2 rounded-xl border border-purple-400 bg-slate-800 text-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
                 >
-                  {drivers.map(drv => (
-                    <option key={drv.id} value={drv.id}>
+                  {drivers.map((drv) => (
+                    <option key={drv.phone || drv.id} value={drv.phone || drv.id}>
                       {drv.name} ({drv.phone}) - {drv.vehicleType || 'دراجة'}
                     </option>
                   ))}
@@ -2987,8 +2746,8 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                   onChange={(e) => setNewStoreId(e.target.value)}
                   className="w-full px-3 py-2 border rounded-xl font-bold bg-white"
                 >
-                  {safeStores.map(st => (
-                    <option key={st.id} value={st.id}>{st.name}</option>
+                  {safeStores.map((st, idx) => (
+                    <option key={st.id || `store-opt-${idx}`} value={st.id}>{st.name}</option>
                   ))}
                 </select>
               </div>
@@ -3105,6 +2864,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
           }}
         />
       )}
+
+      {/* ==================== MODAL: CLEAN ORDER DETAIL MODAL ==================== */}
+      <OrderDetailModal
+        order={selectedDetailOrder}
+        isOpen={Boolean(selectedDetailOrder)}
+        onClose={() => setSelectedDetailOrder(null)}
+        onAssignDriver={(order) => {
+          setOrderToAssign(order);
+          setIsAssignDriverModalOpen(true);
+        }}
+        onCancelOrder={(order) => {
+          handleCancelOrderWithConfirm(order);
+        }}
+        onDeleteOrder={(order) => {
+          handleDeleteOrder(order.id);
+        }}
+        canCancelOrders={canCancelOrders}
+      />
 
       {/* ==================== MODAL 4: DISTANCE & ROUTING VERIFICATION MODAL (Requirement 2) ==================== */}
       {verificationOrder && (

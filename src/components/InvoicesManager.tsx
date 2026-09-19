@@ -26,13 +26,13 @@ import { hasModulePermission } from '../lib/permissions';
 import { logAuditEvent } from '../lib/auditLogger';
 
 interface InvoicesManagerProps {
-  drivers: DriverUser[];
+  drivers?: DriverUser[];
   currentUser: AdminUser | null;
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
-  drivers,
+  drivers = [],
   currentUser,
   onShowToast
 }) => {
@@ -285,7 +285,7 @@ export const InvoicesManager: React.FC<InvoicesManagerProps> = ({
               onChange={(e) => setSelectedDriverFilter(e.target.value)}
               className="w-full bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
             >
-              <option value="all">جميع المندوبين ({driverOptions.length})</option>
+              <option key="all" value="all">جميع المندوبين ({driverOptions.length})</option>
               {driverOptions.map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}

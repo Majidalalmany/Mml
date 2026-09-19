@@ -18,11 +18,12 @@ export default defineConfig(() => {
     server: {
       host: '0.0.0.0',
       port: 3000,
-      hmr: {
-        clientPort: 443,
+      watch: {
+        usePolling: true,
+      },
+      hmr: process.env.DISABLE_HMR === 'true' ? false : {
         overlay: false,
       },
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
     build: {
       chunkSizeWarningLimit: 2000,

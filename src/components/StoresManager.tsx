@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Store as StoreIcon, 
   Plus, 
@@ -34,12 +34,13 @@ import { Store, Category, Product, AdminUser } from '../types';
 import { getCategoryDefaultLogo, getCategoryImageUrl, findServiceCategory, isStoreInServiceCategory, SERVICE_CATEGORIES, getAllServiceCategories, resolveCategoryIconKey } from '../lib/categoryUtils';
 import { hasModulePermission } from '../lib/permissions';
 import { getUnifiedStores, getUnifiedProducts } from '../lib/globalStoreService';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface StoresManagerProps {
-  stores: Store[];
-  categories: Category[];
-  products: Product[];
-  isLoading: boolean;
+  stores?: Store[];
+  categories?: Category[];
+  products?: Product[];
+  isLoading?: boolean;
   selectedCategoryFilter?: string;
   onSelectCategoryFilter?: (filter: string) => void;
   isAddServiceTriggered?: boolean;
@@ -57,10 +58,10 @@ interface StoresManagerProps {
 }
 
 export const StoresManager: React.FC<StoresManagerProps> = ({
-  stores = [],
-  categories = [],
-  products = [],
-  isLoading,
+  stores: propStores = [],
+  categories: propCategories = [],
+  products: propProducts = [],
+  isLoading: propIsLoading,
   selectedCategoryFilter,
   onSelectCategoryFilter,
   onNavigateToCategories,
@@ -76,14 +77,66 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   onSelectStore,
   currentUser
 }) => {
-  const safeStores = getUnifiedStores(stores || []);
-  const safeProducts = getUnifiedProducts(products || []);
-  const safeCategories = categories || [];
+  const [internalStores, setInternalStores] = useState<Store[]>(propStores);
+  const [internalCategories, setInternalCategories] = useState<Category[]>(propCategories);
+  const [internalProducts, setInternalProducts] = useState<Product[]>(propProducts);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propStores.length === 0);
+
+  useEffect(() => {
+    const storesQuery = query(collection(db, 'stores'));
+    const unsubStores = onSnapshot(storesQuery, (snapshot) => {
+      const list: Store[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Store[];
+      setInternalStores(list);
+      setIsComponentLoading(false);
+    }, (err) => {
+      console.warn('Stores onSnapshot error:', err);
+      setIsComponentLoading(false);
+    });
+
+    const catsQuery = query(collection(db, 'categories'));
+    const unsubCats = onSnapshot(catsQuery, (snapshot) => {
+      const list: Category[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+      setInternalCategories(list);
+    }, () => {});
+
+    const prodsQuery = query(collection(db, 'products'));
+    const unsubProds = onSnapshot(prodsQuery, (snapshot) => {
+      const list: Product[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      setInternalProducts(list);
+    }, () => {});
+
+    return () => {
+      unsubStores();
+      unsubCats();
+      unsubProds();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propStores && propStores.length > 0) setInternalStores(propStores);
+  }, [propStores]);
+
+  useEffect(() => {
+    if (propCategories && propCategories.length > 0) setInternalCategories(propCategories);
+  }, [propCategories]);
+
+  useEffect(() => {
+    if (propProducts && propProducts.length > 0) setInternalProducts(propProducts);
+  }, [propProducts]);
+
+  const rawStores = internalStores.length > 0 ? internalStores : propStores;
+  const rawProducts = internalProducts.length > 0 ? internalProducts : propProducts;
+  const rawCategories = internalCategories.length > 0 ? internalCategories : propCategories;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && rawStores.length === 0);
+
+  const safeStores = getUnifiedStores(rawStores);
+  const safeProducts = getUnifiedProducts(rawProducts);
+  const safeCategories = rawCategories;
   const [newServiceType, setNewServiceType] = useState('متاجر عادية');
   const [newServiceDescription, setNewServiceDescription] = useState('');
 
   // All active categories dynamically unified and deduplicated from categories state
-  const allServiceCategories = getAllServiceCategories(safeCategories, safeStores);
+  const allServiceCategories = useMemo(() => getAllServiceCategories(safeCategories, safeStores), [safeCategories, safeStores]);
 
   // Find first category that actually has stores
   const firstCategoryWithStores = allServiceCategories.find(cat => 
@@ -94,7 +147,9 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedService, setSelectedService] = useState<string>(() => selectedCategoryFilter || defaultInitialCategory);
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
   const [deleteConfirmStoreId, setDeleteConfirmStoreId] = useState<string | null>(null);
+  const [activeDropdownStoreId, setActiveDropdownStoreId] = useState<string | null>(null);
 
   const canCreate = hasModulePermission(currentUser, 'restaurants', 'create');
   const canEdit = hasModulePermission(currentUser, 'restaurants', 'edit');
@@ -189,18 +244,20 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
 
   const activeServiceDef = findServiceCategory(selectedService, safeCategories) || allServiceCategories[0];
 
-  const filteredStores = safeStores.filter(s => {
-    const activityName = (s.activityType || s.categoryName || '').toLowerCase();
-    const matchesSearch = !searchTerm.trim() || 
-      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      activityName.includes(searchTerm.toLowerCase());
+  const filteredStores = useMemo(() => {
+    return safeStores.filter(s => {
+      const activityName = (s.activityType || s.categoryName || '').toLowerCase();
+      const matchesSearch = !searchTerm.trim() || 
+        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        activityName.includes(searchTerm.toLowerCase());
 
-    const matchesService = isStoreInServiceCategory(s, selectedService, safeCategories);
-    const matchesStatus = selectedStatus === 'all' || s.status === selectedStatus;
+      const matchesService = isStoreInServiceCategory(s, selectedService, safeCategories);
+      const matchesStatus = selectedStatus === 'all' || s.status === selectedStatus;
 
-    return matchesSearch && matchesService && matchesStatus;
-  });
+      return matchesSearch && matchesService && matchesStatus;
+    });
+  }, [safeStores, searchTerm, selectedService, safeCategories, selectedStatus]);
 
   const getStoreProductsCount = (storeId: string) => {
     return safeProducts.filter(p => p.storeId === storeId || p.storeName === storeId).length;
@@ -451,7 +508,7 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredStores.map((store) => {
             const prodCount = getStoreProductsCount(store.id);
-            const defaultCatLogo = getCategoryDefaultLogo(store.categoryId, store.categoryName, categories);
+            const defaultCatLogo = getCategoryDefaultLogo(store.categoryId, store.categoryName, safeCategories);
 
             return (
               <div 
@@ -593,19 +650,13 @@ export const StoresManager: React.FC<StoresManagerProps> = ({
                     )}
 
                     <div className="flex items-center gap-2">
-                      <select
-                        disabled={!canEdit}
-                        value={store.status}
-                        onChange={(e) => canEdit && onToggleStatus(store, e.target.value as 'open' | 'closed' | 'maintenance')}
-                        className={`flex-1 px-2.5 py-2 rounded-xl border border-gray-200 text-[11px] font-bold bg-slate-50 text-slate-700 focus:ring-1 focus:ring-blue-500 ${
-                          !canEdit ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                        }`}
-                        title="تعديل حالة المتجر (إخفاء/إظهار)"
-                      >
-                        <option value="open">🟢 مفتوح (ظاهر)</option>
-                        <option value="closed">🔴 مغلق (مخفي من الطلبات)</option>
-                        <option value="maintenance">🟡 صيانة مؤقتة</option>
-                      </select>
+                      <span className={`flex-1 px-2.5 py-2 rounded-xl border text-[11px] font-bold text-center ${
+                          store.status === 'open' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
+                          store.status === 'closed' ? 'bg-rose-50 text-rose-700 border-rose-200' : 
+                          'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}>
+                          {store.status === 'open' ? '🟢 مفتوح (ظاهر)' : store.status === 'closed' ? '🔴 مغلق (مخفي)' : '🟡 صيانة مؤقتة'}
+                        </span>
 
                       {canEdit && (
                         <button

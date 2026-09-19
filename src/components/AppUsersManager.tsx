@@ -1,21 +1,45 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Users, User, Phone, Edit2, Plus, Search, ShieldCheck, CheckCircle2, UserCheck, X } from 'lucide-react';
 import { AppUser, AdminUser } from '../types';
 import { checkDuplicateUserPhone } from '../lib/phoneUtils';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface AppUsersManagerProps {
-  users: AppUser[];
+  users?: AppUser[];
   currentUser: AdminUser | null;
-  isLoading: boolean;
+  isLoading?: boolean;
   onSaveUser: (userData: Partial<AppUser>) => Promise<void>;
 }
 
 export const AppUsersManager: React.FC<AppUsersManagerProps> = ({
-  users = [],
+  users: propUsers = [],
   currentUser,
-  isLoading,
+  isLoading: propIsLoading,
   onSaveUser
 }) => {
+  const [internalUsers, setInternalUsers] = useState<AppUser[]>(propUsers);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propUsers.length === 0);
+
+  useEffect(() => {
+    const q = query(collection(db, 'users'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: AppUser[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AppUser[];
+      setInternalUsers(list);
+      setIsComponentLoading(false);
+    }, (err) => {
+      console.warn('Users onSnapshot error:', err);
+      setIsComponentLoading(false);
+    });
+
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propUsers && propUsers.length > 0) setInternalUsers(propUsers);
+  }, [propUsers]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<'all' | 'male' | 'female'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,19 +53,22 @@ export const AppUsersManager: React.FC<AppUsersManagerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const safeUsers = users || [];
+  const safeUsers = internalUsers.length > 0 ? internalUsers : propUsers;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && safeUsers.length === 0);
 
-  const filteredUsers = safeUsers.filter(user => {
-    if (genderFilter !== 'all' && user.gender !== genderFilter) return false;
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      const nameMatch = user.name?.toLowerCase().includes(term);
-      const phoneMatch = user.phone?.toLowerCase().includes(term);
-      const emailMatch = user.email?.toLowerCase().includes(term);
-      if (!nameMatch && !phoneMatch && !emailMatch) return false;
-    }
-    return true;
-  });
+  const filteredUsers = useMemo(() => {
+    return safeUsers.filter(user => {
+      if (genderFilter !== 'all' && user.gender !== genderFilter) return false;
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const nameMatch = user.name?.toLowerCase().includes(term);
+        const phoneMatch = user.phone?.toLowerCase().includes(term);
+        const emailMatch = user.email?.toLowerCase().includes(term);
+        if (!nameMatch && !phoneMatch && !emailMatch) return false;
+      }
+      return true;
+    });
+  }, [safeUsers, genderFilter, searchTerm]);
 
   const handleOpenModal = (user: AppUser) => {
     setError(null);
@@ -62,7 +89,7 @@ export const AppUsersManager: React.FC<AppUsersManagerProps> = ({
     }
 
     // Check duplicate phone
-    const dupCheck = checkDuplicateUserPhone(phone, users, editingUser?.id);
+    const dupCheck = checkDuplicateUserPhone(phone, safeUsers, editingUser?.id);
     if (dupCheck.isDuplicate) {
       setError(`⚠️ رقم الهاتف (${phone.trim()}) مسجل مسبقاً لعميل آخر باسم "${dupCheck.existingName}". يرجى إدخال رقم هاتف آخر.`);
       return;

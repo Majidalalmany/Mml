@@ -274,7 +274,7 @@ export const UserModal: React.FC<UserModalProps> = ({
                 onChange={(e) => setStoreId(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 text-slate-700"
               >
-                <option value="all">كافة المتاجر والفروع (صلاحية عامة)</option>
+                <option key="all" value="all">كافة المتاجر والفروع (صلاحية عامة)</option>
                 {stores.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.categoryName})

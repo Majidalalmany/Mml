@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -34,12 +34,13 @@ import {
   getCategorySubtitle,
   DEFAULT_CATEGORY_BANNER
 } from '../lib/categoryUtils';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface CategoriesManagerProps {
-  categories: Category[];
+  categories?: Category[];
   stores?: Store[];
   products?: Product[];
-  isLoading: boolean;
+  isLoading?: boolean;
   onAddCategory: () => void;
   onEditCategory: (category: Category) => void;
   onDeleteCategory: (categoryId: string) => void;
@@ -50,10 +51,10 @@ interface CategoriesManagerProps {
 }
 
 export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
-  categories = [],
-  stores = [],
-  products = [],
-  isLoading,
+  categories: propCategories = [],
+  stores: propStores = [],
+  products: propProducts = [],
+  isLoading: propIsLoading = false,
   onAddCategory,
   onEditCategory,
   onDeleteCategory,
@@ -62,20 +63,80 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   onNavigateToStores,
   currentUser
 }) => {
+  const [internalCategories, setInternalCategories] = useState<Category[]>(propCategories);
+  const [internalStores, setInternalStores] = useState<Store[]>(propStores);
+  const [internalProducts, setInternalProducts] = useState<Product[]>(propProducts);
+  const [isComponentLoading, setIsComponentLoading] = useState(false);
+
+  useEffect(() => {
+    let unsubCategories = () => {};
+    let unsubStores = () => {};
+    let unsubProducts = () => {};
+
+    setIsComponentLoading(true);
+
+    const qCat = query(collection(db, 'categories'));
+    unsubCategories = onSnapshot(qCat, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Category[];
+      list.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setInternalCategories(list);
+      setIsComponentLoading(false);
+    }, () => setIsComponentLoading(false));
+
+    const qStores = query(collection(db, 'stores'));
+    unsubStores = onSnapshot(qStores, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Store[];
+      setInternalStores(list);
+    }, () => {});
+
+    const qProds = query(collection(db, 'products'));
+    unsubProducts = onSnapshot(qProds, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
+      setInternalProducts(list);
+    }, () => {});
+
+    return () => {
+      unsubCategories();
+      unsubStores();
+      unsubProducts();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propCategories && propCategories.length > 0) setInternalCategories(propCategories);
+  }, [propCategories]);
+
+  useEffect(() => {
+    if (propStores && propStores.length > 0) setInternalStores(propStores);
+  }, [propStores]);
+
+  useEffect(() => {
+    if (propProducts && propProducts.length > 0) setInternalProducts(propProducts);
+  }, [propProducts]);
+
+  const safeCategories = useMemo(() => 
+    internalCategories.length > 0 ? internalCategories : propCategories, 
+    [internalCategories, propCategories]
+  );
+  const safeStores = useMemo(() => 
+    internalStores.length > 0 ? internalStores : propStores, 
+    [internalStores, propStores]
+  );
+  const safeProducts = useMemo(() => 
+    internalProducts.length > 0 ? internalProducts : propProducts, 
+    [internalProducts, propProducts]
+  );
+  const isLoading = propIsLoading || isComponentLoading;
+
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'delivery' | 'field_service'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const canCreate = hasModulePermission(currentUser?.permissions, currentUser?.role, 'categories', 'create');
   const canEdit = hasModulePermission(currentUser?.permissions, currentUser?.role, 'categories', 'edit');
   const canDelete = hasModulePermission(currentUser?.permissions, currentUser?.role, 'categories', 'delete');
-
-  const safeCategories = categories || [];
-  const safeStores = stores || [];
-  const safeProducts = products || [];
 
   // Filter categories
   const filteredCategories = safeCategories.filter(c => {
@@ -363,7 +424,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
               </button>
             )}
 
-            {categories.length === 0 && (
+            {safeCategories.length === 0 && (
               <button
                 onClick={onSeedData}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-2"
@@ -399,7 +460,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                 <div className="relative h-32 w-full bg-slate-900 overflow-hidden shrink-0">
                   <img 
                     src={bannerImg} 
-                    alt={category.name}
+                    alt={category.name} 
                     className={`w-full h-full object-cover transition-transform duration-500 hover:scale-105 ${
                       isServiceActive ? 'opacity-85' : 'opacity-40 grayscale'
                     }`}
@@ -486,26 +547,10 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                       </span>
                     </div>
 
-                    {/* Status Interactive Toggle Switch */}
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[11px] font-bold ${isServiceActive ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {isServiceActive ? 'نشط' : 'متوقف'}
-                      </span>
-                      <button
-                        disabled={!canEdit}
-                        onClick={() => canEdit && onToggleStatus(category)}
-                        title={isServiceActive ? 'إيقاف الخدمة مؤقتاً' : 'تفعيل وتشغيل الخدمة'}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          isServiceActive ? 'bg-emerald-500' : 'bg-slate-300'
-                        } ${!canEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                            isServiceActive ? 'translate-x-0' : '-translate-x-5'
-                          }`}
-                        />
-                      </button>
-                    </div>
+                    {/* Read-Only Status Badge */}
+                    <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${isServiceActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                      {isServiceActive ? 'نشط' : 'متوقف'}
+                    </span>
                   </div>
                 </div>
 
@@ -541,33 +586,17 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
 
                     {/* Delete button */}
                     {canDelete && (
-                      deleteConfirmId === category.id ? (
-                        <div className="flex items-center gap-1 bg-red-50 p-1 rounded-xl border border-red-200 animate-in fade-in">
-                          <button
-                            onClick={() => {
-                              onDeleteCategory(category.id);
-                              setDeleteConfirmId(null);
-                            }}
-                            className="px-2 py-1 bg-red-600 text-white text-[11px] font-bold rounded-lg cursor-pointer"
-                          >
-                            تأكيد
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirmId(null)}
-                            className="px-1.5 text-slate-500 hover:text-slate-800 text-[11px] cursor-pointer"
-                          >
-                            إلغاء
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setDeleteConfirmId(category.id)}
-                          className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                          title="حذف هذه الفئة"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )
+                      <button
+                        onClick={() => {
+                          if (window.confirm('هل أنت متأكد من حذف هذه الفئة وجميع المتاجر والأصناف التابعة لها بشكل نهائي؟')) {
+                            onDeleteCategory(category.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                        title="حذف هذه الفئة"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     )}
                   </div>
 
@@ -692,20 +721,16 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                         </div>
                       </td>
 
-                      {/* Status Toggle Switch */}
+                      {/* Read-Only Status Badge */}
                       <td className="p-4 text-center">
                         <div className="flex flex-col items-center gap-1">
-                          <button
-                            disabled={!canEdit}
-                            onClick={() => canEdit && onToggleStatus(category)}
-                            className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
-                              isServiceActive 
-                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' 
-                                : 'bg-gray-100 text-slate-500 hover:bg-gray-200'
-                            }`}
-                          >
+                          <span className={`px-3 py-1 rounded-full text-[11px] font-bold ${
+                            isServiceActive 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : 'bg-gray-100 text-slate-500'
+                          }`}>
                             {isServiceActive ? 'نشط (مفعل)' : 'متوقف (مخفي)'}
-                          </button>
+                          </span>
                         </div>
                       </td>
 
@@ -721,45 +746,33 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                               <Edit3 className="w-4 h-4" />
                             </button>
                           )}
-
-                          {onNavigateToStores && (
+                          
+                          {canEdit && (
                             <button
-                              onClick={() => onNavigateToStores(category.id)}
-                              className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center shadow-2xs transition-all active:scale-95 cursor-pointer"
-                              title="تصفح متاجر هذا القسم"
+                              onClick={() => onToggleStatus(category)}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center shadow-2xs transition-all active:scale-95 cursor-pointer ${
+                                isServiceActive 
+                                  ? 'bg-gray-100 text-slate-600 hover:bg-amber-100 hover:text-amber-800' 
+                                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                              }`}
+                              title={isServiceActive ? 'إخفاء الخدمة من واجهة التطبيق' : 'إظهار الخدمة في واجهة التطبيق'}
                             >
-                              <StoreIcon className="w-4 h-4" />
+                              {isServiceActive ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           )}
 
                           {canDelete && (
-                            deleteConfirmId === category.id ? (
-                              <div className="flex items-center gap-1 bg-red-50 p-1 rounded-lg border border-red-200 animate-in fade-in">
-                                <button
-                                  onClick={() => {
-                                    onDeleteCategory(category.id);
-                                    setDeleteConfirmId(null);
-                                  }}
-                                  className="px-2 py-0.5 bg-red-600 text-white text-[11px] font-bold rounded cursor-pointer"
-                                >
-                                  تأكيد
-                                </button>
-                                <button
-                                  onClick={() => setDeleteConfirmId(null)}
-                                  className="px-1 text-slate-500 hover:text-slate-800 text-[11px] cursor-pointer"
-                                >
-                                  إلغاء
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setDeleteConfirmId(category.id)}
-                                className="w-8 h-8 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 flex items-center justify-center shadow-2xs transition-all active:scale-95 cursor-pointer"
-                                title="حذف هذا النشاط"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )
+                            <button
+                              onClick={() => {
+                                if (window.confirm('هل أنت متأكد من حذف هذه الفئة وجميع المتاجر والأصناف التابعة لها بشكل نهائي؟')) {
+                                  onDeleteCategory(category.id);
+                                }
+                              }}
+                              className="w-8 h-8 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 flex items-center justify-center shadow-2xs transition-all active:scale-95 cursor-pointer"
+                              title="حذف هذا النشاط"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </div>
                       </td>

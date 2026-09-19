@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   UserCheck, 
   Plus, 
@@ -18,11 +18,12 @@ import {
 } from 'lucide-react';
 import { AdminUser, Store } from '../types';
 import { ROLE_DEFINITIONS } from '../lib/permissions';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface AdminUsersManagerProps {
-  users: AdminUser[];
-  stores: Store[];
-  isLoading: boolean;
+  users?: AdminUser[];
+  stores?: Store[];
+  isLoading?: boolean;
   onAddUser: () => void;
   onEditUser: (user: AdminUser) => void;
   onDeleteUser: (userId: string) => void;
@@ -31,27 +32,65 @@ interface AdminUsersManagerProps {
 }
 
 export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
-  users = [],
-  stores = [],
-  isLoading,
+  users: propUsers = [],
+  stores: propStores = [],
+  isLoading: propIsLoading,
   onAddUser,
   onEditUser,
   onDeleteUser,
   onToggleUserStatus,
   currentUser
 }) => {
+  const [internalUsers, setInternalUsers] = useState<AdminUser[]>(propUsers);
+  const [internalStores, setInternalStores] = useState<Store[]>(propStores);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propUsers.length === 0);
+
+  useEffect(() => {
+    const usersQuery = query(collection(db, 'adminUsers'));
+    const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
+      const list: AdminUser[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AdminUser[];
+      setInternalUsers(list);
+      setIsComponentLoading(false);
+    }, (err) => {
+      console.warn('Admin users onSnapshot error:', err);
+      setIsComponentLoading(false);
+    });
+
+    const storesQuery = query(collection(db, 'stores'));
+    const unsubStores = onSnapshot(storesQuery, (snapshot) => {
+      const list: Store[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Store[];
+      setInternalStores(list);
+    }, () => {});
+
+    return () => {
+      unsubUsers();
+      unsubStores();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propUsers && propUsers.length > 0) setInternalUsers(propUsers);
+  }, [propUsers]);
+
+  useEffect(() => {
+    if (propStores && propStores.length > 0) setInternalStores(propStores);
+  }, [propStores]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const safeUsers = users || [];
-  const safeStores = stores || [];
+  const safeUsers = internalUsers.length > 0 ? internalUsers : propUsers;
+  const safeStores = internalStores.length > 0 ? internalStores : propStores;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && safeUsers.length === 0);
 
-  const filteredUsers = safeUsers.filter(u => 
-    !searchTerm.trim() ||
-    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.phone && u.phone.includes(searchTerm))
-  );
+  const filteredUsers = useMemo(() => {
+    return safeUsers.filter(u => 
+      !searchTerm.trim() ||
+      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.phone && u.phone.includes(searchTerm))
+    );
+  }, [safeUsers, searchTerm]);
 
   const getStoreName = (storeId?: string) => {
     if (!storeId || storeId === 'all') return 'جميع المتاجر (صلاحية عامة)';
@@ -70,7 +109,7 @@ export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
             <UserCheck className="w-5 h-5 text-blue-600" />
             <h2 className="text-xl font-bold text-slate-800">إدارة حسابات طاقم العمل والصلاحيات (RBAC)</h2>
             <span className="bg-blue-50 text-blue-700 text-xs px-2.5 py-0.5 rounded-full font-bold font-sans border border-blue-100">
-              {users.length} موظف ومستخدم
+              {safeUsers.length} موظف ومستخدم
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -261,7 +300,7 @@ export const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({
 
         <div className="p-4 bg-gray-50 border-t border-gray-100 text-xs text-slate-400 flex items-center justify-between">
           <div>
-            إجمالي حسابات طاقم العمل: <span className="font-bold text-slate-800">{users.length}</span>
+            إجمالي حسابات طاقم العمل: <span className="font-bold text-slate-800">{safeUsers.length}</span>
           </div>
           <div className="text-[11px] text-slate-400">
             الصلاحيات وكلمات المرور محفوظة بأمان في Firestore مع دعم شهادة SSL

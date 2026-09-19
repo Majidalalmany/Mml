@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Activity, 
   Search, 
@@ -24,28 +24,70 @@ import {
   Settings
 } from 'lucide-react';
 import { AuditLog, AdminUser } from '../types';
+import { db, collection, query, orderBy, limit, onSnapshot } from '../lib/firebase';
 
 interface AuditLogsManagerProps {
-  logs: AuditLog[];
-  isLoading: boolean;
+  logs?: AuditLog[];
+  isLoading?: boolean;
   currentUser: AdminUser | null;
   onClearLogs?: () => Promise<void>;
   onRefreshLogs?: () => void;
 }
 
 export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
-  logs = [],
-  isLoading,
+  logs: propLogs = [],
+  isLoading: propIsLoading,
   currentUser,
   onClearLogs,
   onRefreshLogs
 }) => {
+  const [internalLogs, setInternalLogs] = useState<AuditLog[]>(propLogs);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propLogs.length === 0);
+
+  useEffect(() => {
+    let unsubLogs: (() => void) | undefined;
+    try {
+      const q = query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(100));
+      unsubLogs = onSnapshot(q, (snapshot) => {
+        const list: AuditLog[] = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as AuditLog[];
+        setInternalLogs(list);
+        setIsComponentLoading(false);
+      }, () => {
+        // Fallback without orderBy
+        const fallbackQ = query(collection(db, 'audit_logs'), limit(100));
+        unsubLogs = onSnapshot(fallbackQ, (snapshot) => {
+          const list: AuditLog[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as AuditLog[];
+          list.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+          setInternalLogs(list);
+          setIsComponentLoading(false);
+        }, () => setIsComponentLoading(false));
+      });
+    } catch {
+      setIsComponentLoading(false);
+    }
+
+    return () => {
+      if (unsubLogs) unsubLogs();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propLogs && propLogs.length > 0) setInternalLogs(propLogs);
+  }, [propLogs]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedTargetType, setSelectedTargetType] = useState<string>('all');
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
-  const safeLogs = logs || [];
+  const safeLogs = internalLogs.length > 0 ? internalLogs : propLogs;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && safeLogs.length === 0);
 
   // Filtered logs
   const filteredLogs = useMemo(() => {

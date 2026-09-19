@@ -21,9 +21,10 @@ import {
   Route,
   PackageCheck
 } from 'lucide-react';
-import L from 'leaflet';
 import { DriverUser, ActiveDeliveryOrder } from '../types';
 import { getLocalVehicles } from '../lib/vehicleService';
+import { loadGoogleMaps } from '../lib/googleMaps';
+import { createAdvancedMarker } from './DriversMapManager';
 
 interface DedicatedDeliveryMapModalProps {
   isOpen: boolean;
@@ -32,26 +33,7 @@ interface DedicatedDeliveryMapModalProps {
   order: ActiveDeliveryOrder | null;
 }
 
-type TileLayerType = 'osm' | 'voyager' | 'satellite';
-
-const TILE_LAYERS: Record<TileLayerType, { name: string; url: string; subdomains?: string; maxZoom?: number }> = {
-  voyager: {
-    name: 'شوارع ناصعة',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd',
-    maxZoom: 19
-  },
-  osm: {
-    name: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    maxZoom: 19
-  },
-  satellite: {
-    name: 'أقمار صناعية 🛰️',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    maxZoom: 18
-  }
-};
+type GoogleMapType = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
 
 export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps> = ({
   isOpen,
@@ -60,178 +42,189 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
   order
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const leafletMapRef = useRef<L.Map | null>(null);
-  const activeTileLayerRef = useRef<L.TileLayer | null>(null);
-  const [selectedLayer, setSelectedLayer] = useState<TileLayerType>('voyager');
-
-  // Change Tile Layer dynamically
-  const switchTileLayer = (layerType: TileLayerType) => {
-    setSelectedLayer(layerType);
-    const map = leafletMapRef.current;
-    if (!map) return;
-
-    if (activeTileLayerRef.current) {
-      map.removeLayer(activeTileLayerRef.current);
-    }
-
-    const config = TILE_LAYERS[layerType];
-    const newLayer = L.tileLayer(config.url, {
-      maxZoom: config.maxZoom || 19,
-      subdomains: config.subdomains || 'abc',
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    activeTileLayerRef.current = newLayer;
-  };
+  const mapInstanceRef = useRef<any>(null);
+  const [activeMapType, setActiveMapType] = useState<GoogleMapType>('roadmap');
 
   useEffect(() => {
     if (!isOpen || !driver || !order || !mapContainerRef.current) return;
 
-    // Small delay to ensure modal DOM is mounted with valid dimensions
-    const timer = setTimeout(() => {
-      if (!mapContainerRef.current) return;
+    let isSubscribed = true;
 
-      // Destroy previous map instance if exists
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
+    loadGoogleMaps().then(async (google) => {
+      if (!isSubscribed || !mapContainerRef.current || !google?.maps) return;
+
+      if (google.maps.importLibrary) {
+        try {
+          await google.maps.importLibrary("marker");
+        } catch (e) {
+          console.warn('Could not import marker library:', e);
+        }
       }
 
       const driverLat = driver.lat || 15.3694;
       const driverLng = driver.lng || 44.1910;
-      const destLat = order.destLat || (driverLat + 0.015);
+      const destLat = order.destLat || (driverLat + 0.012);
       const destLng = order.destLng || (driverLng + 0.015);
       const pickupLat = order.pickupLat || (driverLat - 0.005);
       const pickupLng = order.pickupLng || (driverLng - 0.005);
 
-      // Create Leaflet Map with OpenStreetMap / Carto
-      const map = L.map(mapContainerRef.current, {
+      const map = new google.maps.Map(mapContainerRef.current, {
+        center: { lat: driverLat, lng: driverLng },
+        zoom: 14,
+        mapId: 'DEMO_MAP_ID',
+        mapTypeId: activeMapType,
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
         zoomControl: true,
-        attributionControl: false
-      }).setView([driverLat, driverLng], 14);
+        zoomControlOptions: {
+          position: google.maps.ControlPosition.LEFT_TOP
+        }
+      });
 
-      leafletMapRef.current = map;
+      mapInstanceRef.current = map;
 
-      // Add selected Tile Layer (Carto Voyager by default for crisp aesthetic)
-      const layerConfig = TILE_LAYERS[selectedLayer];
-      const initialLayer = L.tileLayer(layerConfig.url, {
-        maxZoom: layerConfig.maxZoom || 19,
-        subdomains: layerConfig.subdomains || 'abcd',
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(map);
-      activeTileLayerRef.current = initialLayer;
+      const bounds = new google.maps.LatLngBounds();
 
       // 1. Pickup Store Marker
       if (pickupLat && pickupLng) {
-        const pickupIcon = L.divIcon({
-          html: `
-            <div class="relative flex items-center justify-center">
-              <div class="w-10 h-10 rounded-full bg-amber-500 border-2 border-white text-white shadow-xl flex items-center justify-center font-bold text-sm">
-                🏪
-              </div>
-              <div class="absolute -bottom-6 bg-slate-900 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-amber-500/80">
-                ${order.storeName || 'المتجر / نقطة الاستلام'}
-              </div>
-            </div>
-          `,
-          className: 'custom-pickup-modal-marker',
-          iconSize: [40, 40],
-          iconAnchor: [20, 20]
+        const pickupSvg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+            <circle cx="22" cy="22" r="19" fill="#f59e0b" stroke="#ffffff" stroke-width="3" />
+            <text x="22" y="26" font-size="18" text-anchor="middle" dominant-baseline="central">🏪</text>
+          </svg>
+        `.trim();
+
+        const pickupMarker = createAdvancedMarker({
+          position: { lat: pickupLat, lng: pickupLng },
+          map,
+          title: order.storeName || 'المتجر',
+          svgHtml: pickupSvg,
+          zIndex: 30
         });
 
-        const pickupMarker = L.marker([pickupLat, pickupLng], { icon: pickupIcon }).addTo(map);
-        pickupMarker.bindPopup(`
-          <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
-            <div class="font-bold text-xs text-amber-600 mb-1">🏪 نقطة الاستلام (المتجر):</div>
-            <div class="font-extrabold text-slate-800 text-sm">${order.storeName || 'المتجر'}</div>
-            <div class="text-xs text-slate-600 mt-1">${order.pickupAddress}</div>
-          </div>
-        `);
+        const pInfoWindow = new google.maps.InfoWindow({
+          content: `
+            <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
+              <div class="font-bold text-xs text-amber-600 mb-1">🏪 نقطة الاستلام (المتجر):</div>
+              <div class="font-extrabold text-slate-800 text-sm">${order.storeName || 'المتجر'}</div>
+              <div class="text-xs text-slate-600 mt-1">${order.pickupAddress || ''}</div>
+            </div>
+          `
+        });
+        if (pickupMarker) {
+          pickupMarker.addListener('click', () => {
+            pInfoWindow.open({ anchor: pickupMarker, map });
+          });
+        }
+
+        bounds.extend({ lat: pickupLat, lng: pickupLng });
       }
 
       // 2. Driver Marker
-      const isMotorcycle = driver.vehicleType === 'دراجة نارية' || driver.vehicleType === 'موتور';
-      const vehicleEmoji = isMotorcycle ? '🏍️' : '🚗';
-      const driverIcon = L.divIcon({
-        html: `
-          <div class="relative flex items-center justify-center">
-            <div class="absolute -inset-2.5 rounded-full bg-blue-500/40 animate-ping"></div>
-            <div class="w-12 h-12 rounded-full bg-blue-600 border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-xl">
-              ${vehicleEmoji}
-            </div>
-            <div class="absolute -bottom-7 bg-blue-950 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow-lg whitespace-nowrap border border-blue-400">
-              الكابتن: ${driver.name.split(' ')[0]} (${driver.speed || 35} كم/س)
-            </div>
-          </div>
-        `,
-        className: 'custom-driver-modal-marker',
-        iconSize: [48, 48],
-        iconAnchor: [24, 24]
+      const isMotorcycle = driver.vehicleType === 'دراجة نارية' || driver.vehicleType === 'موتور' || driver.vehicleType?.toLowerCase().includes('motorcycle') || driver.vehicleType?.toLowerCase().includes('bike');
+      const isTruck = driver.vehicleType?.includes('شاحنة') || driver.vehicleType?.includes('دينا') || driver.vehicleType?.toLowerCase().includes('truck');
+      const vehicleEmoji = isMotorcycle ? '🏍️' : isTruck ? '🚚' : '🚗';
+      const driverBgColor = isMotorcycle ? '#10b981' : isTruck ? '#8b5cf6' : '#2563eb';
+
+      const driverSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+          <circle cx="25" cy="25" r="22" fill="${driverBgColor}" stroke="#ffffff" stroke-width="3" />
+          <text x="25" y="30" font-size="20" text-anchor="middle" dominant-baseline="central">${vehicleEmoji}</text>
+        </svg>
+      `.trim();
+
+      const driverMarker = createAdvancedMarker({
+        position: { lat: driverLat, lng: driverLng },
+        map,
+        title: driver.name,
+        svgHtml: driverSvg,
+        zIndex: 50
       });
 
-      const driverMarker = L.marker([driverLat, driverLng], { icon: driverIcon }).addTo(map);
-      driverMarker.bindPopup(`
-        <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
-          <div class="font-bold text-xs text-blue-600 mb-1">🚚 الكابتن المكلف:</div>
-          <div class="font-extrabold text-slate-800 text-sm">${driver.name}</div>
-          <div class="text-xs text-slate-600 mt-1">السرعة: ${driver.speed || 0} كم/س | ${driver.vehicleType || 'مركبة توصيل'}</div>
-          <div class="text-xs text-slate-500 mt-0.5">الموقع الحالي: ${driver.locationName || 'موقع مباشر'}</div>
-        </div>
-      `);
+      const dInfoWindow = new google.maps.InfoWindow({
+        content: `
+          <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
+            <div class="font-bold text-xs text-blue-600 mb-1">🚚 الكابتن المكلف:</div>
+            <div class="font-extrabold text-slate-800 text-sm">${driver.name}</div>
+            <div class="text-xs text-slate-600 mt-1">السرعة: ${driver.speed || 0} كم/س | ${driver.vehicleType || 'مركبة توصيل'}</div>
+            <div class="text-xs text-slate-500 mt-0.5">الموقع الحالي: ${driver.locationName || 'موقع مباشر'}</div>
+          </div>
+        `
+      });
+      if (driverMarker) {
+        driverMarker.addListener('click', () => {
+          dInfoWindow.open({ anchor: driverMarker, map });
+        });
+      }
+
+      bounds.extend({ lat: driverLat, lng: driverLng });
 
       // 3. Customer Dropoff Destination Marker
-      const destIcon = L.divIcon({
-        html: `
-          <div class="relative flex items-center justify-center">
-            <div class="absolute -inset-3.5 rounded-full bg-rose-500/40 animate-pulse"></div>
-            <div class="w-12 h-12 rounded-full bg-rose-600 border-3 border-white text-white shadow-2xl flex items-center justify-center font-bold text-xl">
-              🎯
-            </div>
-            <div class="absolute -bottom-8 bg-slate-900 text-amber-300 text-[11px] font-extrabold px-2.5 py-1 rounded-lg shadow-xl whitespace-nowrap border border-rose-500">
-              📍 وجهة التوصيل: ${order.customerName}
-            </div>
-          </div>
-        `,
-        className: 'custom-dest-modal-marker',
-        iconSize: [48, 48],
-        iconAnchor: [24, 24]
+      const destSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="21" fill="#e11d48" stroke="#ffffff" stroke-width="3" />
+          <text x="24" y="28" font-size="20" text-anchor="middle" dominant-baseline="central">🎯</text>
+        </svg>
+      `.trim();
+
+      const destMarker = createAdvancedMarker({
+        position: { lat: destLat, lng: destLng },
+        map,
+        title: order.customerName,
+        svgHtml: destSvg,
+        zIndex: 40
       });
 
-      const destMarker = L.marker([destLat, destLng], { icon: destIcon }).addTo(map);
-      destMarker.bindPopup(`
-        <div class="p-2.5 text-right dir-rtl font-sans" dir="rtl">
-          <div class="font-black text-xs text-rose-600 mb-1">🏁 نقطة تسليم الطلب النهائي:</div>
-          <div class="font-extrabold text-slate-900 text-sm">${order.customerName}</div>
-          <div class="text-xs text-slate-600 font-mono my-1">📞 ${order.customerPhone}</div>
-          <div class="text-xs text-slate-700 bg-rose-50 p-2 rounded border border-rose-200 mt-1">📍 ${order.dropoffAddress}</div>
-        </div>
-      `);
+      const destInfoWindow = new google.maps.InfoWindow({
+        content: `
+          <div class="p-2.5 text-right dir-rtl font-sans" dir="rtl">
+            <div class="font-black text-xs text-rose-600 mb-1">🏁 نقطة تسليم الطلب النهائي:</div>
+            <div class="font-extrabold text-slate-900 text-sm">${order.customerName}</div>
+            <div class="text-xs text-slate-600 font-mono my-1">📞 ${order.customerPhone}</div>
+            <div class="text-xs text-slate-700 bg-rose-50 p-2 rounded border border-rose-200 mt-1">📍 ${order.dropoffAddress}</div>
+          </div>
+        `
+      });
+      if (destMarker) {
+        destMarker.addListener('click', () => {
+          destInfoWindow.open({ anchor: destMarker, map });
+        });
+      }
+
+      bounds.extend({ lat: destLat, lng: destLng });
 
       // 4. Draw Route Polylines
-      const routePoints: L.LatLngExpression[] = [];
-      if (pickupLat && pickupLng) routePoints.push([pickupLat, pickupLng]);
-      routePoints.push([driverLat, driverLng]);
-      routePoints.push([destLat, destLng]);
+      const routePoints: Array<{ lat: number; lng: number }> = [];
+      if (pickupLat && pickupLng) routePoints.push({ lat: pickupLat, lng: pickupLng });
+      routePoints.push({ lat: driverLat, lng: driverLng });
+      routePoints.push({ lat: destLat, lng: destLng });
 
-      const polyline = L.polyline(routePoints, {
-        color: '#f59e0b',
-        weight: 6,
-        opacity: 0.9,
-        dashArray: '10, 8'
-      }).addTo(map);
+      new google.maps.Polyline({
+        path: routePoints,
+        strokeColor: '#f59e0b',
+        strokeOpacity: 0.95,
+        strokeWeight: 5,
+        map
+      });
 
-      // Fit map bounds with generous padding
-      map.fitBounds(polyline.getBounds(), { padding: [80, 80] });
-    }, 120);
+      map.fitBounds(bounds, 80);
+    }).catch(err => {
+      console.error('Failed to load Google Maps in DedicatedDeliveryMapModal:', err);
+    });
 
     return () => {
-      clearTimeout(timer);
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-      }
+      isSubscribed = false;
     };
   }, [isOpen, driver, order]);
+
+  // Handle Map Type Change
+  const handleMapTypeChange = (type: GoogleMapType) => {
+    setActiveMapType(type);
+    if (mapInstanceRef.current && (window as any).google?.maps) {
+      mapInstanceRef.current.setMapTypeId(type);
+    }
+  };
 
   if (!isOpen || !driver || !order) return null;
 
@@ -256,247 +249,165 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
   const deliveryFee = order.fee || dynamicCalculatedFee;
   const totalOrderAmount = order.totalAmount || (deliveryFee + (order.itemsTotal || 2500));
 
-  // Free OpenStreetMap Direction & External Browser URL
-  const osmDirectionsUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${driverLat}%2C${driverLng}%3B${destLat}%2C${destLng}`;
+  // Official Google Maps URL
   const googleMapsWebUrl = `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${destLat},${destLng}&travelmode=driving`;
-  const whatsappUrl = `https://wa.me/967${order.customerPhone}?text=${encodeURIComponent(`حياك الله أخي ${order.customerName}، نود إبلاغك بأن الكابتن ${driver.name} في طريقه إليك لتسليم الطلب رقم #${order.orderNumber}`)}`;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-6xl h-[94vh] sm:h-[90vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden relative dir-rtl" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-xs dir-rtl" dir="rtl">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl h-[92vh] max-h-[850px] flex flex-col overflow-hidden border border-slate-700/20">
         
-        {/* Modal Header */}
-        <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between gap-3 shrink-0 border-b border-slate-800">
+        {/* Header Bar */}
+        <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shrink-0 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center font-bold text-lg shrink-0">
-              🚚
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
+              <Navigation className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="font-extrabold text-base sm:text-lg text-white">
-                  تفاصيل المشوار والطلب المباشر - #{order.orderNumber}
-                </h2>
-                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-                  المندوب في طريق التسليم
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black tracking-tight">التتبع الملاحي المباشر عبر Google Maps</h2>
+                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  متصل ومحدث لحظياً
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                الكابتن المكلف: <strong className="text-amber-300">{driver.name}</strong> ➔ العميل المستلم: <strong className="text-emerald-300">{order.customerName}</strong>
+                تتبع كابتن التوصيل والطلب رقم: <span className="font-mono text-amber-400 font-bold">#{order.orderNumber}</span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <a
-              href={osmDirectionsUrl}
+              href={googleMapsWebUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
-              title="فتح مسار التوجيه في OpenStreetMap"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+              title="فتح المسار في خرائط جوجل الرسمية"
             >
-              <Globe className="w-4 h-4 text-emerald-200" />
-              <span className="hidden md:inline">OpenStreetMap 🗺️</span>
-              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Google Maps</span>
             </a>
 
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              title="إغلاق النافذة"
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Modal Main Content (Map + Detailed Info Sidebar) */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden bg-slate-50">
+        {/* Modal Main Body Grid */}
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
           
-          {/* Map View Area (7 cols on desktop) */}
-          <div className="lg:col-span-7 relative h-[300px] sm:h-[380px] lg:h-full flex flex-col bg-slate-100 border-l border-slate-200">
+          {/* Map Section (Col 8) */}
+          <div className="lg:col-span-8 relative bg-slate-950 flex flex-col h-full min-h-[300px]">
             
-            {/* Top Bar Floating Status & Free Layer Switcher */}
-            <div className="absolute top-3 right-3 left-3 z-[400] bg-slate-900/90 text-white backdrop-blur-md p-2.5 sm:p-3 rounded-xl shadow-xl border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-amber-400 animate-pulse" />
-                <span>المسار: <strong className="text-amber-300">{order.storeName || 'المتجر'}</strong> ➔ <strong className="text-emerald-300">{order.customerName}</strong></span>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {/* Free Tile Layer Switcher */}
-                <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
-                  <button
-                    onClick={() => switchTileLayer('voyager')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                      selectedLayer === 'voyager' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    شوارع عصرية
-                  </button>
-                  <button
-                    onClick={() => switchTileLayer('osm')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                      selectedLayer === 'osm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    OSM 🗺️
-                  </button>
-                  <button
-                    onClick={() => switchTileLayer('satellite')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                      selectedLayer === 'satellite' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    أقمار صناعية 🛰️
-                  </button>
-                </div>
-              </div>
+            {/* Native Google Map View */}
+            <div ref={mapContainerRef} className="w-full h-full" />
+
+            {/* Map Layer Switcher Pill */}
+            <div className="absolute top-4 right-4 z-10 bg-slate-900/90 backdrop-blur-md rounded-2xl p-1 shadow-2xl border border-slate-700/60 flex items-center gap-1">
+              <button
+                onClick={() => handleMapTypeChange('roadmap')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeMapType === 'roadmap' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800'}`}
+              >
+                شوارع جوجل
+              </button>
+              <button
+                onClick={() => handleMapTypeChange('satellite')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeMapType === 'satellite' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800'}`}
+              >
+                أقمار صناعية 🛰️
+              </button>
+              <button
+                onClick={() => handleMapTypeChange('terrain')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeMapType === 'terrain' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800'}`}
+              >
+                تضاريس 🏔️
+              </button>
             </div>
 
-            {/* Dedicated Leaflet Map Container */}
-            <div ref={mapContainerRef} className="w-full flex-1 z-0" />
-
-            {/* Map Legend Overlay */}
-            <div className="absolute bottom-3 right-3 z-[400] bg-white/95 backdrop-blur-md p-2.5 rounded-xl shadow-lg border border-slate-200 text-[11px] space-y-1 text-slate-700 font-medium hidden sm:block">
+            {/* Bottom Overlay Telemetry Bar */}
+            <div className="absolute bottom-4 left-4 right-4 z-10 bg-slate-900/95 backdrop-blur-md rounded-2xl p-3 border border-slate-700/80 shadow-2xl flex items-center justify-between gap-2 text-white text-xs">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-blue-600 border border-white"></span>
-                <span>موقع الكابتن الحالي ({driver.speed || 35} كم/س)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-amber-500 border border-white"></span>
-                <span>نقطة الاستلام ({order.storeName || 'المتجر'})</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-rose-600 border border-white"></span>
-                <span>وجهة العميل النهائية (التوصيل)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Detailed Financial & Order Info Sidebar (5 cols on desktop) */}
-          <div className="lg:col-span-5 p-4 sm:p-5 overflow-y-auto custom-scrollbar flex flex-col gap-4 bg-white">
-            
-            {/* 1. FINANCIAL & DISTANCE SUMMARY CARD (Requested by user) */}
-            <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 rounded-2xl shadow-md space-y-3.5 border border-slate-700">
-              <div className="flex items-center justify-between border-b border-slate-700/80 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="w-5 h-5 text-emerald-400" />
-                  <h3 className="font-extrabold text-sm text-white">البيانات المالية ومسافة الرحلة الكلية</h3>
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-mono font-bold">
+                  {driver.speed || 35}
                 </div>
-                <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  حساب دقيق بالكيلومتر
-                </span>
-              </div>
-
-              {/* 3 Metrics Cards */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                {/* Total Road Distance */}
-                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
-                  <span className="text-[10px] text-slate-400 block mb-1">المسافة الكلية للرحلة</span>
-                  <div className="text-base font-black font-mono text-blue-300 flex items-center justify-center gap-1">
-                    <Route className="w-3.5 h-3.5 text-blue-400" />
-                    <span>{roadDist} كم</span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 block mt-0.5">طرقية واقعية</span>
-                </div>
-
-                {/* Delivery Fee */}
-                <div className="bg-slate-800/90 p-2.5 rounded-xl border border-slate-700">
-                  <span className="text-[10px] text-slate-400 block mb-1">رسوم التوصيل</span>
-                  <div className="text-base font-black font-mono text-amber-300">
-                    {deliveryFee.toLocaleString()} <span className="text-[10px] font-normal">ر.ي</span>
-                  </div>
-                  <span className="text-[9px] text-amber-400/80 block mt-0.5">أجرة الكابتن</span>
-                </div>
-
-                {/* Total Final Amount */}
-                <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-500/40">
-                  <span className="text-[10px] text-emerald-300 block mb-1">المبلغ الإجمالي</span>
-                  <div className="text-base font-black font-mono text-emerald-400">
-                    {totalOrderAmount.toLocaleString()} <span className="text-[10px] font-normal">ر.ي</span>
-                  </div>
-                  <span className="text-[9px] text-emerald-300/80 block mt-0.5">المستحق من العميل</span>
+                <div>
+                  <div className="text-[10px] text-slate-400">السرعة الحالية</div>
+                  <div className="font-extrabold text-white">كم / ساعة</div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-800/60 px-3 py-1.5 rounded-xl">
-                <span>⏱️ الوقت التقديري للوصول: <strong className="text-amber-300 font-bold">{order.estimatedMinutes || 14} دقيقة</strong></span>
-                <span>🛵 وسيلة النقل: <strong className="text-slate-100">{driver.vehicleType || 'دراجة نارية'}</strong></span>
-              </div>
-            </div>
-
-            {/* 2. Customer Details Box */}
-            <div className="bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-200 p-4 rounded-xl shadow-xs space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-rose-950 border-b border-rose-200 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <User className="w-4 h-4 text-rose-600" />
-                  <span>تفاصيل العميل والوجهة المحددة</span>
-                </div>
-                <span className="bg-rose-200/80 text-rose-900 text-[10px] px-2 py-0.5 rounded font-mono font-bold">
-                  طلب #{order.orderNumber}
-                </span>
-              </div>
+              <div className="h-6 w-px bg-slate-800"></div>
 
               <div>
-                <div className="text-[11px] text-slate-500">اسم العميل المستلم:</div>
-                <div className="text-sm font-extrabold text-slate-900">{order.customerName}</div>
+                <div className="text-[10px] text-slate-400">المسافة المتبقية</div>
+                <div className="font-mono font-extrabold text-amber-400">{roadDist} كم</div>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <a
-                  href={`tel:${order.customerPhone}`}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>اتصال بالعميل ({order.customerPhone})</span>
-                </a>
+              <div className="h-6 w-px bg-slate-800"></div>
 
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                  title="تواصل عبر واتساب"
-                >
-                  <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>واتساب</span>
-                </a>
+              <div>
+                <div className="text-[10px] text-slate-400">زمن الوصول المتوقع</div>
+                <div className="font-mono font-extrabold text-emerald-400">~ {Math.max(5, Math.round(roadDist * 3))} دقيقة</div>
               </div>
 
-              <div className="bg-white p-3 rounded-lg border border-rose-100 space-y-1">
-                <div className="text-[11px] text-rose-600 font-bold flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  <span>عنوان التسليم بالتحديد:</span>
+              <div className="h-6 w-px bg-slate-800"></div>
+
+              <div>
+                <div className="text-[10px] text-slate-400">أجرة التوصيل</div>
+                <div className="font-mono font-extrabold text-white">{deliveryFee} ر.ي</div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Details & Telemetry Sidebar (Col 4) */}
+          <div className="lg:col-span-4 bg-slate-50 border-r border-slate-200 p-4 sm:p-5 overflow-y-auto flex flex-col justify-between space-y-4">
+            
+            {/* Order Info Card */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">تفاصيل الشحنة</span>
+                <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full border border-amber-200">
+                  قيد التوصيل الآن
+                </span>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <Store className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-400 block">نقطة الانطلاق (المتجر):</span>
+                    <strong className="text-slate-800 font-bold">{order.storeName || 'المتجر الرئيسي'}</strong>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{order.pickupAddress}</p>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-800 font-bold leading-relaxed">{order.dropoffAddress}</div>
+
+                <div className="flex items-start gap-2.5 pt-1">
+                  <div className="w-6 h-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-slate-400 block">وجهة التسليم (العميل):</span>
+                    <strong className="text-slate-800 font-bold">{order.customerName}</strong>
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">{order.customerPhone}</p>
+                    <p className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded mt-1 border border-slate-100">{order.dropoffAddress}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* 3. Pickup Store Details Box */}
-            <div className="bg-amber-50/70 border border-amber-200 p-4 rounded-xl shadow-xs space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950 border-b border-amber-200 pb-2">
-                <Store className="w-4 h-4 text-amber-600" />
-                <span>متجر الطلب وموقع الاستلام</span>
-              </div>
-
-              <div className="text-xs text-slate-800">
-                <span className="text-slate-500">المتجر: </span>
-                <strong className="text-amber-900 font-bold">{order.storeName || 'مركز خدمة فزعة المباشر'}</strong>
-              </div>
-
-              <div className="text-xs text-slate-700 bg-white/80 p-2.5 rounded-lg border border-amber-100">
-                <span className="text-[11px] text-amber-800 font-bold block mb-0.5">عنوان الاستلام:</span>
-                <span>{order.pickupAddress}</span>
-              </div>
-            </div>
-
-            {/* 4. Driver Profile Box */}
-            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-800 border-b border-slate-200 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-600" />
-                  <span>بيانات الكابتن المسؤول عن التوصيل</span>
+            {/* Driver Profile & Contact */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>بيانات الكابتن</span>
                 </div>
                 <span className="text-emerald-600 font-bold text-[11px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                   ● متصل بالخدمة
@@ -542,23 +453,13 @@ export const DedicatedDeliveryMapModal: React.FC<DedicatedDeliveryMapModalProps>
             {/* Quick Actions Footer inside Modal */}
             <div className="pt-2 space-y-2 mt-auto">
               <a
-                href={osmDirectionsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-              >
-                <Globe className="w-4 h-4 text-emerald-200" />
-                <span>فتح التوجيه الملاحي المباشر في OpenStreetMap</span>
-              </a>
-
-              <a
                 href={googleMapsWebUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer text-center"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
               >
-                <Compass className="w-4 h-4 text-amber-400" />
-                <span>عرض في متصفح خرائط الويب</span>
+                <Compass className="w-4 h-4 text-white" />
+                <span>فتح الملاحة الرسمية في Google Maps</span>
               </a>
 
               <button

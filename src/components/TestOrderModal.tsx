@@ -423,11 +423,11 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
                   {POPULAR_LOCATIONS.map((loc, i) => (
-                    <option key={i} value={i}>
+                    <option key={`pickup-loc-${i}-${loc.name}`} value={i}>
                       🏪 {loc.name}
                     </option>
                   ))}
-                  <option value="custom">📍 إحداثيات مخصصة (إدخال يدوي حر)</option>
+                  <option key="pickup-custom" value="custom">📍 إحداثيات مخصصة (إدخال يدوي حر)</option>
                 </select>
 
                 {/* Coordinate Inputs with dynamic event listener */}
@@ -483,11 +483,11 @@ export const TestOrderModal: React.FC<TestOrderModalProps> = ({
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 >
                   {POPULAR_LOCATIONS.map((loc, i) => (
-                    <option key={i} value={i}>
+                    <option key={`dropoff-loc-${i}-${loc.name}`} value={i}>
                       📍 {loc.name}
                     </option>
                   ))}
-                  <option value="custom">📍 إحداثيات مخصصة (إدخال يدوي حر)</option>
+                  <option key="dropoff-custom" value="custom">📍 إحداثيات مخصصة (إدخال يدوي حر)</option>
                 </select>
 
                 {/* Coordinate Inputs with dynamic event listener */}

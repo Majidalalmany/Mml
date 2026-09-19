@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Truck, 
   MapPin, 
@@ -32,26 +32,117 @@ import {
 } from 'lucide-react';
 import { FazaaOrder, FazaaCategory, AdminUser } from '../types';
 import { hasModulePermission } from '../lib/permissions';
+import { db, collection, query, onSnapshot } from '../lib/firebase';
 
 interface FazaaOrdersManagerProps {
-  orders: FazaaOrder[];
-  categories: FazaaCategory[];
+  orders?: FazaaOrder[];
+  categories?: FazaaCategory[];
   currentUser: AdminUser | null;
-  isLoading: boolean;
+  isLoading?: boolean;
   onCreateOrder: (orderData: Partial<FazaaOrder>) => Promise<void>;
   onUpdateOrderStatus: (orderId: string, status: FazaaOrder['status'], driverName?: string, driverPhone?: string) => Promise<void>;
   onCreateCategory: (categoryData: Partial<FazaaCategory>) => Promise<void>;
 }
 
 export const FazaaOrdersManager: React.FC<FazaaOrdersManagerProps> = ({
-  orders = [],
-  categories = [],
+  orders: propOrders = [],
+  categories: propCategories = [],
   currentUser,
-  isLoading,
+  isLoading: propIsLoading,
   onCreateOrder,
   onUpdateOrderStatus,
   onCreateCategory
 }) => {
+  const [internalOrders, setInternalOrders] = useState<FazaaOrder[]>(propOrders);
+  const [internalCategories, setInternalCategories] = useState<FazaaCategory[]>(propCategories);
+  const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propOrders.length === 0);
+
+  useEffect(() => {
+    let unsubFazaa: (() => void) | undefined;
+    let unsubManfaa: (() => void) | undefined;
+    let unsubCats: (() => void) | undefined;
+
+    const fazaaMap = new Map<string, FazaaOrder>();
+
+    const qFazaa = query(collection(db, 'fazaa_orders'));
+    unsubFazaa = onSnapshot(qFazaa, (snapshot) => {
+      snapshot.docs.forEach(docSnap => {
+        const d = docSnap.data();
+        fazaaMap.set(docSnap.id, {
+          id: docSnap.id,
+          orderNumber: d.orderNumber || `FZ-${docSnap.id.substring(0, 5)}`,
+          scope: d.scope || 'fazaa',
+          customerName: d.customerName || d.userName || 'عميل فزعة',
+          customerPhone: d.customerPhone || d.phone || '',
+          pickupAddress: d.pickupAddress || d.pickupLocation || '',
+          deliveryAddress: d.deliveryAddress || d.deliveryLocation || '',
+          packageDetails: d.packageDetails || d.description || d.itemsSummary || 'طرد',
+          weightKg: Number(d.weightKg || d.weight || 1),
+          distanceKm: Number(d.distanceKm || d.distance || 5),
+          deliveryFee: Number(d.deliveryFee || d.fee || d.cost || 500),
+          status: d.status || 'new',
+          isExpress: Boolean(d.isExpress),
+          createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+          ...d
+        } as unknown as FazaaOrder);
+      });
+      const combined = Array.from(fazaaMap.values());
+      combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setInternalOrders(combined);
+      setIsComponentLoading(false);
+    }, () => setIsComponentLoading(false));
+
+    const qManfaa = query(collection(db, 'manfaa_orders'));
+    unsubManfaa = onSnapshot(qManfaa, (snapshot) => {
+      snapshot.docs.forEach(docSnap => {
+        const d = docSnap.data();
+        fazaaMap.set(docSnap.id, {
+          id: docSnap.id,
+          orderNumber: d.orderNumber || `MN-${docSnap.id.substring(0, 5)}`,
+          scope: 'manfaa',
+          customerName: d.customerName || d.userName || 'عميل منفعة',
+          customerPhone: d.customerPhone || d.phone || '',
+          pickupAddress: d.pickupAddress || d.pickupLocation || '',
+          deliveryAddress: d.deliveryAddress || d.deliveryLocation || '',
+          packageDetails: d.packageDetails || d.description || 'طلب منفعة تجاري',
+          weightKg: Number(d.weightKg || d.weight || 1),
+          distanceKm: Number(d.distanceKm || d.distance || 5),
+          deliveryFee: Number(d.deliveryFee || d.fee || d.cost || 500),
+          status: d.status || 'new',
+          isExpress: Boolean(d.isExpress),
+          createdAt: d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt : d.createdAt.toDate ? d.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
+          ...d
+        } as unknown as FazaaOrder);
+      });
+      const combined = Array.from(fazaaMap.values());
+      combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setInternalOrders(combined);
+    }, () => {});
+
+    const qCats = query(collection(db, 'fazaa_categories'));
+    unsubCats = onSnapshot(qCats, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as FazaaCategory[];
+      if (list.length > 0) setInternalCategories(list);
+    }, () => {});
+
+    return () => {
+      if (unsubFazaa) unsubFazaa();
+      if (unsubManfaa) unsubManfaa();
+      if (unsubCats) unsubCats();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (propOrders && propOrders.length > 0) setInternalOrders(propOrders);
+  }, [propOrders]);
+
+  useEffect(() => {
+    if (propCategories && propCategories.length > 0) setInternalCategories(propCategories);
+  }, [propCategories]);
+
+  const orders = internalOrders.length > 0 ? internalOrders : propOrders;
+  const categories = internalCategories.length > 0 ? internalCategories : propCategories;
+  const isLoading = (propIsLoading !== undefined ? propIsLoading : false) || (isComponentLoading && orders.length === 0);
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'categories' | 'pricing_calculator'>('orders');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('all');

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -28,6 +28,7 @@ import {
   Cell 
 } from 'recharts';
 import { Order } from '../types';
+import { db, collection, query, limit, onSnapshot } from '../lib/firebase';
 
 interface DashboardOverviewProps {
   orders?: Order[];
@@ -55,11 +56,31 @@ const CATEGORY_SHARE = [
 ];
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
-  orders = [],
+  orders: propOrders = [],
   onNavigateToFinancial,
   onNavigateToDelivery,
   onNavigateToGlobalStores,
 }) => {
+  const [internalOrders, setInternalOrders] = useState<Order[]>(propOrders);
+
+  useEffect(() => {
+    const ordersQuery = query(collection(db, 'orders'), limit(100));
+    const unsub = onSnapshot(ordersQuery, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Order[];
+      setInternalOrders(list);
+    }, (err) => {
+      console.warn('Dashboard orders listener error:', err);
+    });
+
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (propOrders && propOrders.length > 0) setInternalOrders(propOrders);
+  }, [propOrders]);
+
+  const orders = internalOrders.length > 0 ? internalOrders : propOrders;
+
   const isOrderGlobal = (order: Order) => Boolean(
     order.orderType === 'global_store' ||
     order.orderType?.includes?.('global_store') ||
@@ -71,12 +92,21 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     (order.items && order.items.some((it: any) => it.productUrl || it.sourceUrl || it.storeName?.includes('أمازون') || it.storeName?.includes('Amazon') || it.storeName?.includes('AliExpress') || it.storeName?.includes('SHEIN') || it.storeName?.includes('شي إن')))
   );
 
-  const globalOrders = orders.filter(isOrderGlobal);
-  const globalOrdersRevenue = globalOrders.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
-  const calculatedOrdersRevenue = orders.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
+  const { globalOrders, globalOrdersRevenue, calculatedOrdersRevenue, totalOrdersCount, totalRevenue } = useMemo(() => {
+    const globals = orders.filter(isOrderGlobal);
+    const gRevenue = globals.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
+    const calcRevenue = orders.reduce((acc, curr) => acc + (curr.total || curr.totalPrice || 0), 0);
+    const count = orders.length > 0 ? orders.length + 1480 : 1524;
+    const rev = calcRevenue > 0 ? (5730000 + calcRevenue) : 5730000;
+    return {
+      globalOrders: globals,
+      globalOrdersRevenue: gRevenue,
+      calculatedOrdersRevenue: calcRevenue,
+      totalOrdersCount: count,
+      totalRevenue: rev
+    };
+  }, [orders]);
 
-  const totalOrdersCount = orders.length > 0 ? orders.length + 1480 : 1524;
-  const totalRevenue = calculatedOrdersRevenue > 0 ? (5730000 + calculatedOrdersRevenue) : 5730000; // YER
   const activeDrivers = 32;
   const registeredUsers = 8940;
 

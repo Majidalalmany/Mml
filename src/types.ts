@@ -422,6 +422,7 @@ export interface Order {
   adminReviewNotes?: string;
   confirmedByAdminAt?: string;
   confirmedByAdminName?: string;
+  assignedAt?: string;
   routingMethod?: 'google_routes_api' | 'road_network_topology';
   status: OrderStatus;
   serviceType?: 'regular' | 'manfaah' | 'fazaa' | 'global_store' | string;
@@ -452,6 +453,7 @@ export interface AuditLog {
   details?: string;
   severity: 'info' | 'warning' | 'error' | 'critical';
   createdAt?: any;
+  timestamp?: any;
 }
 
 export interface SupportChatMessage {

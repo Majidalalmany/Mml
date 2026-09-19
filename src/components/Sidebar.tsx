@@ -40,8 +40,8 @@ interface SidebarProps {
   onAddService?: () => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
-  productsCount: number;
-  categoriesCount: number;
+  productsCount?: number;
+  categoriesCount?: number;
   categories?: Category[];
   stores?: Store[];
   currentUser: AdminUser | null;
@@ -55,8 +55,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onAddService,
   isOpen,
   setIsOpen,
-  productsCount,
-  categoriesCount,
+  productsCount = 0,
+  categoriesCount = 0,
   categories = [],
   stores = [],
   currentUser
@@ -66,8 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const allNavItems = [
     { id: 'dashboard' as TabType, label: 'الرئيسية (إحصائيات الموقع)', icon: LayoutDashboard },
-    { id: 'categories' as TabType, label: 'إدارة الفئات والخدمات', icon: Layers, count: categories.length, highlight: true },
-    { id: 'restaurants' as TabType, label: 'المتاجر والأنشطة التجارية', icon: StoreIcon, count: stores.length, hasSubMenu: true },
+    { id: 'restaurants' as TabType, label: 'إدارة الأنشطة التجارية', icon: StoreIcon, count: categories.length, highlight: true },
     { id: 'delivery' as TabType, label: 'خريطة المندوبين المباشرة', icon: Truck, highlight: true },
     { id: 'offers' as TabType, label: 'العروض والإعلانات', icon: Gift },
     { id: 'fazaa' as TabType, label: 'أسطول وطلبات فزعة', icon: Truck },
@@ -164,92 +163,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const Icon = item.icon;
               const isActive = activeTab === item.id;
 
-              if (item.id === 'restaurants') {
-                return (
-                  <div key={item.id} className="space-y-1">
-                    <button
-                      onClick={() => {
-                        setActiveTab('restaurants');
-                        setIsServicesExpanded(!isServicesExpanded);
-                      }}
-                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                        isActive 
-                          ? 'bg-blue-50 text-blue-700 font-bold' 
-                          : 'text-slate-500 hover:bg-gray-50 hover:text-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
-                        <span className="truncate">{item.label}</span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        {item.count !== undefined && (
-                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-sans font-semibold ${
-                            isActive ? 'bg-blue-600 text-white' : 'bg-gray-100 text-slate-600'
-                          }`}>
-                            {item.count}
-                          </span>
-                        )}
-                        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isServicesExpanded ? 'rotate-180 text-blue-600' : ''}`} />
-                      </div>
-                    </button>
-
-                    {/* Sub-menu Dropdown List */}
-                    {isServicesExpanded && (
-                      <div className="pr-4 pl-1 pt-1 pb-1 space-y-0.5 border-r-2 border-blue-200 mr-3">
-                        {allCategoriesList.map((sub) => {
-                          const isSubActive = isActive && (
-                            selectedCategoryFilter === sub.id || 
-                            selectedCategoryFilter === sub.label ||
-                            sub.keywords.some(kw => selectedCategoryFilter === kw)
-                          );
-                          return (
-                            <button
-                              key={sub.id}
-                              onClick={() => {
-                                if (onSelectCategory) {
-                                  onSelectCategory(sub.id);
-                                }
-                                setActiveTab('restaurants');
-                                if (window.innerWidth < 1024) setIsOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-colors text-right ${
-                                isSubActive
-                                  ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                                  : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'
-                              }`}
-                            >
-                              <img 
-                                src={getCategoryImageUrl(sub, sub.label)} 
-                                alt={sub.label} 
-                                className="w-5 h-5 rounded-md object-cover shrink-0 border border-gray-200" 
-                                referrerPolicy="no-referrer"
-                              />
-                              <span className="truncate flex-1">{sub.label}</span>
-                            </button>
-                          );
-                        })}
-
-                        {/* REQUIREMENT 3: LAST OPTION IN SERVICES DROPDOWN: + إضافة خدمة جديدة */}
-                        <button
-                          onClick={() => {
-                            if (onAddService) {
-                              onAddService();
-                            }
-                            if (window.innerWidth < 1024) setIsOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 px-2.5 py-2 mt-1 rounded-md text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-all text-right shadow-2xs cursor-pointer"
-                        >
-                          <FolderPlus className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                          <span className="truncate flex-1">+ إضافة خدمة جديدة</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-
               return (
                 <button
                   key={item.id}
@@ -257,10 +170,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     setActiveTab(item.id);
                     if (window.innerWidth < 1024) setIsOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
                     isActive 
-                      ? 'bg-blue-50 text-blue-700 font-bold' 
-                      : 'text-slate-500 hover:bg-gray-50 hover:text-slate-800'
+                      ? 'bg-blue-50 text-blue-700 font-bold border border-blue-200' 
+                      : 'text-slate-600 hover:bg-gray-100/70 hover:text-slate-900'
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -270,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   <div className="flex items-center gap-1.5">
                     {item.count !== undefined && (
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-sans font-semibold ${
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-mono font-bold ${
                         isActive ? 'bg-blue-600 text-white' : 'bg-gray-100 text-slate-600'
                       }`}>
                         {item.count}

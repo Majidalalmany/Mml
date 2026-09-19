@@ -32,7 +32,7 @@ import {
   Lock,
   Globe
 } from 'lucide-react';
-import L from 'leaflet';
+import { loadGoogleMaps, GOOGLE_MAPS_API_KEY } from '../lib/googleMaps';
 import { collection, query, where, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, db } from '../lib/firebase';
 import { DriverUser, AdminUser, ActiveDeliveryOrder } from '../types';
 import { hasModulePermission } from '../lib/permissions';
@@ -48,34 +48,24 @@ export interface DriverLocationPoint {
   timestamp: string;
 }
 
-type FreeTileLayerType = 'osm' | 'voyager' | 'satellite' | 'dark';
+type GoogleMapType = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
 
-const FREE_TILE_LAYERS: Record<FreeTileLayerType, { name: string; url: string; subdomains?: string; maxZoom?: number; attr?: string }> = {
-  voyager: {
-    name: 'شوارع ناصعة',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd',
-    maxZoom: 19,
-    attr: '&copy; CARTO &copy; OpenStreetMap contributors'
-  },
-  osm: {
-    name: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    maxZoom: 19,
-    attr: '&copy; OpenStreetMap contributors'
+const GOOGLE_MAP_TYPES: Record<GoogleMapType, { name: string; description: string }> = {
+  roadmap: {
+    name: 'شوارع جوجل',
+    description: 'خريطة شوارع جوجل الرسمية والتفصيلية'
   },
   satellite: {
     name: 'أقمار صناعية 🛰️',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    maxZoom: 18,
-    attr: '&copy; Esri & OpenStreetMap'
+    description: 'تصوير فضائي عالي الدقة عبر الأقمار الصناعية'
   },
-  dark: {
-    name: 'ليلي 🌙',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    subdomains: 'abcd',
-    maxZoom: 19,
-    attr: '&copy; CARTO &copy; OpenStreetMap'
+  hybrid: {
+    name: 'هجين 🗺️',
+    description: 'أقمار صناعية مدمجة مع شبكة الشوارع'
+  },
+  terrain: {
+    name: 'تضاريس 🏔️',
+    description: 'تضاريس ومرتفعات جغرافية'
   }
 };
 
@@ -349,6 +339,50 @@ export function getVehicleRouteTheme(vehicleType?: string | null): VehicleRouteT
   };
 }
 
+/**
+ * Modern Google Maps AdvancedMarkerElement helper
+ * Falls back to legacy Marker if AdvancedMarkerElement is not ready
+ */
+export function createAdvancedMarker(options: {
+  map: any;
+  position: { lat: number; lng: number };
+  title?: string;
+  svgHtml?: string;
+  zIndex?: number;
+}): any {
+  const google = (window as any).google;
+  if (!google?.maps) return null;
+
+  if (google.maps.marker?.AdvancedMarkerElement) {
+    const el = document.createElement('div');
+    el.style.display = 'inline-block';
+    el.style.cursor = 'pointer';
+    if (options.svgHtml) {
+      el.innerHTML = options.svgHtml.trim();
+    }
+    return new google.maps.marker.AdvancedMarkerElement({
+      map: options.map,
+      position: options.position,
+      title: options.title,
+      content: el,
+      zIndex: options.zIndex
+    });
+  }
+
+  // Safe fallback when marker library is initializing; never call deprecated Marker
+  return null;
+}
+
+export function safeRemoveMarker(m: any) {
+  if (!m) return;
+  try {
+    if (typeof m.setMap === 'function') {
+      m.setMap(null);
+    }
+  } catch (e) {}
+  m.map = null;
+}
+
 interface DriversMapManagerProps {
   currentUser: AdminUser | null;
   onShowToast?: (msg: string, type?: 'success' | 'error') => void;
@@ -393,8 +427,8 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   const [activeTrailPoints, setActiveTrailPoints] = useState<DriverLocationPoint[]>([]);
   const [isLoadingTrail, setIsLoadingTrail] = useState<boolean>(false);
 
-  // Free OpenStreetMap & Leaflet Tile Layer State
-  const [tileLayerType, setTileLayerType] = useState<FreeTileLayerType>('voyager');
+  // Google Map Type State
+  const [mapType, setMapType] = useState<GoogleMapType>('roadmap');
   const [cityCenter, setCityCenter] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
 
   // Vehicle Category Filter & Fleet Multi-Route Mode
@@ -404,66 +438,54 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   // Active Delivery Route Destination States
   const [activeDeliveryOrder, setActiveDeliveryOrder] = useState<ActiveDeliveryOrder | null>(null);
   const [isDedicatedModalOpen, setIsDedicatedModalOpen] = useState<boolean>(false);
+  const [isMapReady, setIsMapReady] = useState<boolean>(false);
 
-  // Map Refs
+  // Google Map Refs
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const leafletMapRef = useRef<L.Map | null>(null);
-  const activeTileLayerRef = useRef<L.TileLayer | null>(null);
-  const markersRef = useRef<{ [key: string]: L.Marker }>({});
-  const polylineRef = useRef<L.Polyline | null>(null);
-  const polylineGlowRef = useRef<L.Polyline | null>(null);
-  const trailMarkersRef = useRef<L.Marker[]>([]);
+  const googleMapRef = useRef<any>(null);
+  const markersRef = useRef<{ [key: string]: any }>({});
+  const polylineRef = useRef<any>(null);
+  const polylineGlowRef = useRef<any>(null);
+  const trailMarkersRef = useRef<any[]>([]);
 
   // Active Delivery Route Map Refs
-  const deliveryPolylineRef = useRef<L.Polyline | null>(null);
-  const deliveryGlowPolylineRef = useRef<L.Polyline | null>(null);
-  const destMarkerRef = useRef<L.Marker | null>(null);
-  const pickupMarkerRef = useRef<L.Marker | null>(null);
+  const deliveryPolylineRef = useRef<any>(null);
+  const deliveryGlowPolylineRef = useRef<any>(null);
+  const destMarkerRef = useRef<any>(null);
+  const pickupMarkerRef = useRef<any>(null);
 
   // Fleet Multi-Routes Refs
-  const allRoutesPolylinesRef = useRef<L.Polyline[]>([]);
-  const allRoutesMarkersRef = useRef<L.Marker[]>([]);
+  const allRoutesPolylinesRef = useRef<any[]>([]);
+  const allRoutesMarkersRef = useRef<any[]>([]);
 
   const canCreate = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'create');
   const canEdit = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'edit');
   const canDelete = !currentUser || hasModulePermission(currentUser.permissions, currentUser.role, 'drivers_management', 'delete');
 
-  // Dynamic Tile Layer Switcher for Leaflet (No API Keys required)
-  const switchTileLayer = (layerType: FreeTileLayerType) => {
-    setTileLayerType(layerType);
-    const map = leafletMapRef.current;
-    if (!map) return;
-
-    if (activeTileLayerRef.current) {
-      map.removeLayer(activeTileLayerRef.current);
+  // Dynamic Google Map Type Switcher
+  const switchMapType = (type: GoogleMapType) => {
+    setMapType(type);
+    if (googleMapRef.current && (window as any).google?.maps) {
+      googleMapRef.current.setMapTypeId(type);
     }
-
-    const config = FREE_TILE_LAYERS[layerType];
-    const newLayer = L.tileLayer(config.url, {
-      maxZoom: config.maxZoom || 19,
-      subdomains: config.subdomains || 'abcd',
-      attribution: config.attr || '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    activeTileLayerRef.current = newLayer;
   };
 
   // Clear Active Delivery Route and Destination Markers from Map
   const clearActiveDeliveryRoute = () => {
     if (deliveryPolylineRef.current) {
-      deliveryPolylineRef.current.remove();
+      deliveryPolylineRef.current.setMap(null);
       deliveryPolylineRef.current = null;
     }
     if (deliveryGlowPolylineRef.current) {
-      deliveryGlowPolylineRef.current.remove();
+      deliveryGlowPolylineRef.current.setMap(null);
       deliveryGlowPolylineRef.current = null;
     }
     if (destMarkerRef.current) {
-      destMarkerRef.current.remove();
+      safeRemoveMarker(destMarkerRef.current);
       destMarkerRef.current = null;
     }
     if (pickupMarkerRef.current) {
-      pickupMarkerRef.current.remove();
+      safeRemoveMarker(pickupMarkerRef.current);
       pickupMarkerRef.current = null;
     }
     setActiveDeliveryOrder(null);
@@ -472,14 +494,14 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
   // Clear Path and Waypoint Markers from Map
   const clearDriverPath = () => {
     if (polylineRef.current) {
-      polylineRef.current.remove();
+      polylineRef.current.setMap(null);
       polylineRef.current = null;
     }
     if (polylineGlowRef.current) {
-      polylineGlowRef.current.remove();
+      polylineGlowRef.current.setMap(null);
       polylineGlowRef.current = null;
     }
-    trailMarkersRef.current.forEach(m => m.remove());
+    trailMarkersRef.current.forEach(m => safeRemoveMarker(m));
     trailMarkersRef.current = [];
     setActiveTrailDriverId(null);
     setTrailPointsCount(0);
@@ -488,17 +510,18 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
   // Clear Fleet Multi-Routes from Map
   const clearAllFleetRoutes = () => {
-    allRoutesPolylinesRef.current.forEach(p => p.remove());
+    allRoutesPolylinesRef.current.forEach(p => p.setMap(null));
     allRoutesPolylinesRef.current = [];
-    allRoutesMarkersRef.current.forEach(m => m.remove());
+    allRoutesMarkersRef.current.forEach(m => safeRemoveMarker(m));
     allRoutesMarkersRef.current = [];
   };
 
   // Draw Active Delivery Route with Vehicle-Specific Color Coding (🟢 Green for Bike, 🔵 Blue for Car, 🟣 Purple for Truck)
   const handleDrawActiveOrderRoute = (driver: DriverUser) => {
     clearActiveDeliveryRoute();
-    const map = leafletMapRef.current;
-    if (!map || !driver || !driver.isOnline || driver.status !== 'active') return;
+    const map = googleMapRef.current;
+    const google = (window as any).google;
+    if (!map || !google?.maps || !driver || !driver.isOnline || driver.status !== 'active') return;
 
     const theme = getVehicleRouteTheme(driver.vehicleType);
     const driverLat = driver.lat || 15.3694;
@@ -546,104 +569,120 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
 
     if (!order) return;
 
+    const bounds = new google.maps.LatLngBounds();
+
     // 1. Draw Pickup Store Marker if available
     if (order.pickupLat && order.pickupLng) {
-      const pickupIcon = L.divIcon({
-        html: `
-          <div class="relative flex items-center justify-center">
-            <div class="w-8 h-8 rounded-full bg-amber-500 border-2 border-white text-white shadow-md flex items-center justify-center font-bold text-xs">
-              🏪
-            </div>
-            <div class="absolute -bottom-5 bg-slate-900 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap border border-amber-500">
-              ${order.storeName || 'المتجر'}
-            </div>
-          </div>
-        `,
-        className: 'custom-pickup-store-marker',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
+      const pickupSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="16" fill="#f59e0b" stroke="#ffffff" stroke-width="2" />
+          <text x="18" y="22" font-size="14" text-anchor="middle" dominant-baseline="central">🏪</text>
+        </svg>
+      `.trim();
+
+      const pMarker = createAdvancedMarker({
+        position: { lat: order.pickupLat, lng: order.pickupLng },
+        map,
+        title: order.storeName || 'المتجر',
+        svgHtml: pickupSvg,
+        zIndex: 30
       });
 
-      const pMarker = L.marker([order.pickupLat, order.pickupLng], { icon: pickupIcon }).addTo(map);
-      pMarker.bindPopup(`<div class="p-1.5 text-right font-sans" dir="rtl"><b class="text-amber-600 text-xs">🏪 نقطة الاستلام / المتجر:</b><br/><span class="font-bold text-slate-800 text-xs">${order.storeName}</span><br/><span class="text-[11px] text-slate-500">${order.pickupAddress}</span></div>`);
-      pickupMarkerRef.current = pMarker;
+      const pInfo = new google.maps.InfoWindow({
+        content: `<div class="p-1.5 text-right font-sans" dir="rtl"><b class="text-amber-600 text-xs">🏪 نقطة الاستلام / المتجر:</b><br/><span class="font-bold text-slate-800 text-xs">${order.storeName}</span><br/><span class="text-[11px] text-slate-500">${order.pickupAddress}</span></div>`
+      });
+      if (pMarker) {
+        pMarker.addListener('click', () => pInfo.open({ anchor: pMarker, map }));
+        pickupMarkerRef.current = pMarker;
+      }
+      bounds.extend({ lat: order.pickupLat, lng: order.pickupLng });
     }
 
     // 2. Draw Customer Dropoff Destination Marker with Vehicle Theming
-    const destIcon = L.divIcon({
-      html: `
-        <div class="relative flex items-center justify-center">
-          <div class="absolute -inset-3 rounded-full animate-ping opacity-60" style="background-color: ${theme.primaryColor};"></div>
-          <div class="w-10 h-10 rounded-full border-2 border-white text-white shadow-2xl flex items-center justify-center font-bold text-base" style="background-color: ${theme.primaryColor};">
-            🎯
-          </div>
-          <div class="absolute -bottom-7 bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded shadow-xl whitespace-nowrap border" style="border-color: ${theme.primaryColor};">
-            <span>${theme.iconEmoji} وجهة: ${order.customerName.split(' ')[0]}</span>
-          </div>
-        </div>
-      `,
-      className: 'custom-dest-dropoff-marker',
-      iconSize: [40, 40],
-      iconAnchor: [20, 20]
+    const destSvg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r="17" fill="${theme.primaryColor}" stroke="#ffffff" stroke-width="2.5" />
+        <text x="20" y="24" font-size="16" text-anchor="middle" dominant-baseline="central">🎯</text>
+      </svg>
+    `.trim();
+
+    const dMarker = createAdvancedMarker({
+      position: { lat: order.destLat, lng: order.destLng },
+      map,
+      title: order.customerName,
+      svgHtml: destSvg,
+      zIndex: 40
     });
 
-    const dMarker = L.marker([order.destLat, order.destLng], { icon: destIcon }).addTo(map);
-    dMarker.bindPopup(`
-      <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
-        <div class="font-extrabold text-xs mb-1 flex items-center gap-1" style="color: ${theme.primaryColor};">
-          <span>${theme.iconEmoji}</span>
-          <span>مسار تسليم ${theme.nameAr} (${order.orderNumber})</span>
+    const dInfo = new google.maps.InfoWindow({
+      content: `
+        <div class="p-2 text-right dir-rtl font-sans" dir="rtl">
+          <div class="font-extrabold text-xs mb-1 flex items-center gap-1" style="color: ${theme.primaryColor};">
+            <span>${theme.iconEmoji}</span>
+            <span>مسار تسليم ${theme.nameAr} (${order.orderNumber})</span>
+          </div>
+          <div class="text-xs text-slate-900 font-bold">👤 المستلم: ${order.customerName}</div>
+          <div class="text-[10px] text-slate-600 font-mono mb-1">📞 ${order.customerPhone}</div>
+          <div class="text-[11px] text-slate-700 border-t pt-1 border-slate-200">📍 ${order.dropoffAddress}</div>
+          <div class="mt-1.5 text-[10px] font-bold p-1.5 rounded border" style="background-color: ${theme.glowColor}; border-color: ${theme.primaryColor}; color: #0f172a;">
+            ⏱️ الوقت المقدر: ${order.estimatedMinutes || 10} دقيقة (${order.distanceKm || 3} كم) | الكابتن: ${driver.name}
+          </div>
         </div>
-        <div class="text-xs text-slate-900 font-bold">👤 المستلم: ${order.customerName}</div>
-        <div class="text-[10px] text-slate-600 font-mono mb-1">📞 ${order.customerPhone}</div>
-        <div class="text-[11px] text-slate-700 border-t pt-1 border-slate-200">📍 ${order.dropoffAddress}</div>
-        <div class="mt-1.5 text-[10px] font-bold p-1.5 rounded border" style="background-color: ${theme.glowColor}; border-color: ${theme.primaryColor}; color: #0f172a;">
-          ⏱️ الوقت المقدر: ${order.estimatedMinutes || 10} دقيقة (${order.distanceKm || 3} كم) | الكابتن: ${driver.name}
-        </div>
-      </div>
-    `);
-    destMarkerRef.current = dMarker;
+      `
+    });
+    if (dMarker) {
+      dMarker.addListener('click', () => dInfo.open({ anchor: dMarker, map }));
+      destMarkerRef.current = dMarker;
+    }
+    bounds.extend({ lat: order.destLat, lng: order.destLng });
+    bounds.extend({ lat: driverLat, lng: driverLng });
 
     // 3. Draw Active Delivery Polyline Route (Dual layer: Glow + Sharp Colored Polyline)
-    const routePoints: L.LatLngExpression[] = [];
+    const routePoints: Array<{ lat: number; lng: number }> = [];
     if (order.pickupLat && order.pickupLng) {
-      routePoints.push([order.pickupLat, order.pickupLng]);
+      routePoints.push({ lat: order.pickupLat, lng: order.pickupLng });
     }
-    routePoints.push([driverLat, driverLng]);
-    routePoints.push([order.destLat, order.destLng]);
+    routePoints.push({ lat: driverLat, lng: driverLng });
+    routePoints.push({ lat: order.destLat, lng: order.destLng });
 
     // Layer 1: Ambient Glow
-    const glowPolyline = L.polyline(routePoints, {
-      color: theme.primaryColor,
-      weight: theme.weight + 6,
-      opacity: 0.35
-    }).addTo(map);
+    const glowPolyline = new google.maps.Polyline({
+      path: routePoints,
+      strokeColor: theme.primaryColor,
+      strokeWeight: theme.weight + 6,
+      strokeOpacity: 0.35,
+      map
+    });
     deliveryGlowPolylineRef.current = glowPolyline;
 
     // Layer 2: Main Vehicle-Themed Route Polyline
-    const polyline = L.polyline(routePoints, {
-      color: theme.primaryColor,
-      weight: theme.weight,
-      opacity: 0.95,
-      dashArray: theme.dashArray
-    }).addTo(map);
+    const polyline = new google.maps.Polyline({
+      path: routePoints,
+      strokeColor: theme.primaryColor,
+      strokeWeight: theme.weight,
+      strokeOpacity: 0.95,
+      map
+    });
 
     deliveryPolylineRef.current = polyline;
     setActiveDeliveryOrder(order);
 
     // Fit map view to show both driver and destination
-    map.fitBounds(polyline.getBounds(), { padding: [80, 80] });
+    map.fitBounds(bounds);
   };
 
   // Fetch or Generate Driver 2-Hour Trajectory Path from Firestore with Vehicle Color Theme
   const handleLoadDriverTrail = async (driver: DriverUser) => {
-    if (!driver || !leafletMapRef.current) return;
+    if (!driver || !googleMapRef.current) return;
     setIsLoadingTrail(true);
     
     // Clear previous drawn route
     clearDriverPath();
 
-    const map = leafletMapRef.current;
+    const map = googleMapRef.current;
+    const google = (window as any).google;
+    if (!google?.maps) return;
+
     const theme = getVehicleRouteTheme(driver.vehicleType);
     const driverLat = driver.lat || 15.3694;
     const driverLng = driver.lng || 44.1910;
@@ -706,60 +745,51 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
       }
 
       // Draw Path Polyline on Map using Vehicle Color Theme
-      const latLngs: L.LatLngExpression[] = recentPoints.map(p => [p.lat, p.lng]);
+      const latLngs = recentPoints.map(p => ({ lat: p.lat, lng: p.lng }));
       
-      const glowPolyline = L.polyline(latLngs, {
-        color: theme.primaryColor,
-        weight: theme.weight + 5,
-        opacity: 0.3
-      }).addTo(map);
+      const glowPolyline = new google.maps.Polyline({
+        path: latLngs,
+        strokeColor: theme.primaryColor,
+        strokeWeight: theme.weight + 5,
+        strokeOpacity: 0.3,
+        map
+      });
       polylineGlowRef.current = glowPolyline;
 
-      const polyline = L.polyline(latLngs, {
-        color: theme.primaryColor, // Dynamic: Green for Bike, Blue for Car, Purple for Truck
-        weight: theme.weight,
-        opacity: 0.9,
-        dashArray: theme.dashArray
-      }).addTo(map);
+      const polyline = new google.maps.Polyline({
+        path: latLngs,
+        strokeColor: theme.primaryColor,
+        strokeWeight: theme.weight,
+        strokeOpacity: 0.9,
+        map
+      });
 
       polylineRef.current = polyline;
 
       // Add START Marker (🏁 نقطة بداية المسار قبل ساعتين)
       if (recentPoints.length > 0) {
         const startPt = recentPoints[0];
-        const startIcon = L.divIcon({
-          html: `
-            <div class="text-white font-bold text-[10px] px-2 py-1 rounded-full shadow-lg border-2 border-white whitespace-nowrap flex items-center gap-1" style="background-color: ${theme.primaryColor};">
-              <span>🏁 بداية مسار (${theme.nameAr})</span>
-              <span class="opacity-80 font-mono">(${new Date(startPt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })})</span>
-            </div>
-          `,
-          className: 'custom-start-flag-marker',
-          iconAnchor: [40, 15]
-        });
+        const startSvg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="16" fill="${theme.primaryColor}" stroke="#ffffff" stroke-width="2" />
+            <text x="18" y="22" font-size="14" text-anchor="middle" dominant-baseline="central">🏁</text>
+          </svg>
+        `.trim();
 
-        const startMarker = L.marker([startPt.lat, startPt.lng], { icon: startIcon }).addTo(map);
+        const startMarker = createAdvancedMarker({
+          position: { lat: startPt.lat, lng: startPt.lng },
+          map,
+          title: `بداية مسار (${theme.nameAr})`,
+          svgHtml: startSvg,
+          zIndex: 25
+        });
         trailMarkersRef.current.push(startMarker);
-
-        // Add intermediate trajectory nodes with time & speed tooltips
-        recentPoints.forEach((pt, idx) => {
-          if (idx > 0 && idx < recentPoints.length - 1) {
-            const nodeIcon = L.divIcon({
-              html: `<div class="w-3.5 h-3.5 rounded-full border-2 border-white shadow-xs" style="background-color: ${theme.primaryColor};"></div>`,
-              className: 'custom-path-node-icon',
-              iconAnchor: [7, 7]
-            });
-
-            const nodeMarker = L.marker([pt.lat, pt.lng], { icon: nodeIcon }).addTo(map);
-            const timeFormatted = new Date(pt.timestamp).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' });
-            nodeMarker.bindTooltip(`الساعة: ${timeFormatted} | السرعة: ${pt.speed || 0} كم/س | ${theme.nameAr}`, { direction: 'top' });
-            trailMarkersRef.current.push(nodeMarker);
-          }
-        });
       }
 
       // Fit map bounds to show the entire 2-hour trajectory nicely
-      map.fitBounds(polyline.getBounds(), { padding: [60, 60] });
+      const bounds = new google.maps.LatLngBounds();
+      recentPoints.forEach(pt => bounds.extend({ lat: pt.lat, lng: pt.lng }));
+      map.fitBounds(bounds);
 
       setActiveTrailDriverId(driver.id);
       setTrailPointsCount(recentPoints.length);
@@ -813,137 +843,49 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // 2. Initialize Leaflet Map with OpenStreetMap / CartoDB
+  // 2. Initialize Google Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
+    let isSubscribed = true;
 
-    if (!leafletMapRef.current) {
-      // Default view over Yemen (Sana'a)
-      const map = L.map(mapContainerRef.current, {
-        center: [15.3694, 44.1910],
-        zoom: 7,
-        zoomControl: false
-      });
+    loadGoogleMaps().then(async google => {
+      if (!isSubscribed || !mapContainerRef.current || !google?.maps) return;
 
-      // Free Tile Layer (CartoDB Voyager or OSM)
-      const config = FREE_TILE_LAYERS[tileLayerType];
-      const initialLayer = L.tileLayer(config.url, {
-        maxZoom: config.maxZoom || 19,
-        subdomains: config.subdomains || 'abcd',
-        attribution: config.attr || '&copy; OpenStreetMap contributors'
-      }).addTo(map);
+      if (google.maps.importLibrary) {
+        try {
+          await google.maps.importLibrary("marker");
+        } catch (e) {
+          console.warn('Could not import marker library:', e);
+        }
+      }
 
-      activeTileLayerRef.current = initialLayer;
+      if (!googleMapRef.current && mapContainerRef.current) {
+        const map = new google.maps.Map(mapContainerRef.current, {
+          center: { lat: 15.3694, lng: 44.1910 },
+          zoom: 7,
+          mapId: 'DEMO_MAP_ID',
+          mapTypeId: mapType,
+          streetViewControl: false,
+          mapTypeControl: false,
+          fullscreenControl: false,
+          zoomControl: true,
+          zoomControlOptions: {
+            position: google.maps.ControlPosition.LEFT_TOP
+          }
+        });
 
-      // Add zoom control top-left
-      L.control.zoom({ position: 'topleft' }).addTo(map);
-
-      leafletMapRef.current = map;
-    }
+        googleMapRef.current = map;
+        setIsMapReady(true);
+      }
+    }).catch(err => {
+      console.error('Failed to load Google Maps in DriversMapManager:', err);
+    });
 
     return () => {
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-      }
+      isSubscribed = false;
+      setIsMapReady(false);
     };
   }, []);
-
-  // 3. Update Map Markers when `filteredDrivers` change
-  useEffect(() => {
-    const map = leafletMapRef.current;
-    if (!map) return;
-
-    // Clear existing markers
-    Object.values(markersRef.current).forEach(m => m.remove());
-    markersRef.current = {};
-
-    filteredDrivers.forEach(driver => {
-      const lat = driver.lat || 15.3694;
-      const lng = driver.lng || 44.1910;
-      const theme = getVehicleRouteTheme(driver.vehicleType);
-
-      // Determine marker color and pulse styling
-      const isOnline = driver.isOnline && driver.status === 'active';
-      const isBusy = (driver.assignedOrdersCount || 0) > 0;
-      const isAvailable = isOnline && !isBusy;
-
-      const markerHtml = `
-        <div class="relative flex items-center justify-center cursor-pointer transition-transform hover:scale-110">
-          ${isAvailable ? `<div class="absolute -inset-2.5 rounded-full animate-ping opacity-60" style="background-color: ${theme.primaryColor};"></div>` : isOnline ? `<div class="absolute -inset-2 rounded-full bg-amber-400/40 animate-ping"></div>` : ''}
-          <div class="w-10 h-10 rounded-full border-2 text-white shadow-lg flex items-center justify-center font-bold text-xs" style="background-color: ${!isOnline ? '#334155' : theme.primaryColor}; border-color: ${!isOnline ? '#64748b' : '#ffffff'}; box-shadow: 0 4px 14px ${theme.glowColor};">
-            ${theme.iconEmoji}
-          </div>
-          <div class="absolute -bottom-5 text-[10px] font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap border text-white" style="background-color: #0f172a; border-color: ${theme.primaryColor};">
-            ${driver.name.split(' ')[0] || 'مندوب'} ${isAvailable ? '⚡ متاح' : ''}
-          </div>
-        </div>
-      `;
-
-      const customIcon = L.divIcon({
-        html: markerHtml,
-        className: 'custom-driver-marker-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
-      });
-
-      const marker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
-
-      // Popup Content
-      const popupHtml = `
-        <div class="p-2 font-sans text-right dir-rtl" dir="rtl" style="min-width: 220px;">
-          <div class="flex items-center gap-2 border-b border-slate-200 pb-2 mb-2">
-            <div class="w-8 h-8 rounded-full text-white font-bold text-xs flex items-center justify-center" style="background-color: ${theme.primaryColor};">
-              ${theme.iconEmoji}
-            </div>
-            <div>
-              <h4 class="font-bold text-xs text-slate-800 m-0">${driver.name}</h4>
-              <span class="text-[10px] text-slate-500 font-mono">${driver.phone}</span>
-            </div>
-          </div>
-          
-          <div class="space-y-1 text-xs mb-3 text-slate-600">
-            <div class="flex items-center justify-between">
-              <span>حالة الإسناد:</span>
-              <span class="font-bold ${isAvailable ? 'text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200' : isBusy ? 'text-amber-600' : 'text-slate-400'}">
-                ${isAvailable ? '⚡ متاح للإسناد الان' : isBusy ? '🚚 مشغول بطلب' : '🔴 غير متصل'}
-              </span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>نوع المركبة والمسار:</span>
-              <span class="font-bold px-1.5 py-0.5 rounded text-[10px]" style="background-color: ${theme.glowColor}; color: #0f172a;">
-                ${theme.iconEmoji} ${theme.nameAr}
-              </span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>رقم اللوحة:</span>
-              <span class="font-bold text-slate-800 font-mono">${driver.plateNumber || 'بدون لوحة'}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>الإحداثيات الحية:</span>
-              <span class="font-bold font-mono text-[10px]" style="color: ${theme.primaryColor};">${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>السرعة المباشرة:</span>
-              <span class="font-bold text-blue-600 font-mono">${driver.speed || 0} كم/س</span>
-            </div>
-            <div class="flex items-center justify-between">
-              <span>الطلبات المسندة:</span>
-              <span class="font-bold text-amber-600">${driver.assignedOrdersCount || 0} طلبات</span>
-            </div>
-          </div>
-        </div>
-      `;
-
-      marker.bindPopup(popupHtml);
-
-      marker.on('click', () => {
-        handleFocusDriverOnMap(driver);
-      });
-
-      markersRef.current[driver.id] = marker;
-    });
-  }, [drivers, statusFilter, searchTerm, vehicleCategoryFilter]);
 
   // Filtered drivers list for sidebar list & map rendering
   const filteredDrivers = useMemo(() => {
@@ -971,11 +913,104 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     });
   }, [drivers, searchTerm, statusFilter, vehicleCategoryFilter]);
 
+  // 3. Update Map Markers when `filteredDrivers` change
+  useEffect(() => {
+    const map = googleMapRef.current;
+    const google = (window as any).google;
+    if (!map || !google?.maps) return;
+
+    // Clear existing markers
+    Object.values(markersRef.current).forEach((m: any) => safeRemoveMarker(m));
+    markersRef.current = {};
+
+    filteredDrivers.forEach(driver => {
+      const lat = driver.lat || 15.3694;
+      const lng = driver.lng || 44.1910;
+      const theme = getVehicleRouteTheme(driver.vehicleType);
+
+      // Determine marker color and pulse styling
+      const isOnline = driver.isOnline && driver.status === 'active';
+      const isBusy = (driver.assignedOrdersCount || 0) > 0;
+      const isAvailable = isOnline && !isBusy;
+
+      const markerColor = !isOnline ? '#334155' : theme.primaryColor;
+      const borderColor = !isOnline ? '#64748b' : '#ffffff';
+
+      const markerSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46">
+          <circle cx="23" cy="23" r="20" fill="${markerColor}" stroke="${borderColor}" stroke-width="2.5" />
+          <text x="23" y="27" font-size="18" text-anchor="middle" dominant-baseline="central">${theme.iconEmoji}</text>
+        </svg>
+      `.trim();
+
+      const marker = createAdvancedMarker({
+        position: { lat, lng },
+        map,
+        title: driver.name,
+        svgHtml: markerSvg,
+        zIndex: isAvailable ? 50 : 20
+      });
+
+      const infoContent = `
+        <div class="p-2 font-sans text-right dir-rtl" dir="rtl" style="min-width: 220px; font-family: sans-serif;">
+          <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 8px;">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background-color: ${theme.primaryColor}; color: white; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+              ${theme.iconEmoji}
+            </div>
+            <div>
+              <h4 style="margin: 0; font-size: 13px; font-weight: bold; color: #1e293b;">${driver.name}</h4>
+              <span style="font-size: 11px; color: #64748b; font-family: monospace;">${driver.phone}</span>
+            </div>
+          </div>
+          
+          <div style="font-size: 11px; line-height: 1.6; color: #475569;">
+            <div style="display: flex; justify-content: space-between;">
+              <span>حالة الإسناد:</span>
+              <strong style="color: ${isAvailable ? '#16a34a' : isBusy ? '#d97706' : '#94a3b8'};">
+                ${isAvailable ? '⚡ متاح للإسناد الان' : isBusy ? '🚚 مشغول بطلب' : '🔴 غير متصل'}
+              </strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>نوع المركبة:</span>
+              <strong style="color: #0f172a;">${theme.iconEmoji} ${theme.nameAr}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>رقم اللوحة:</span>
+              <strong style="font-family: monospace; color: #1e293b;">${driver.plateNumber || 'بدون لوحة'}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>السرعة المباشرة:</span>
+              <strong style="color: #2563eb; font-family: monospace;">${driver.speed || 0} كم/س</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>الطلبات المسندة:</span>
+              <strong style="color: #d97706;">${driver.assignedOrdersCount || 0} طلبات</strong>
+            </div>
+          </div>
+        </div>
+      `;
+
+      if (marker) {
+        const infoWindow = new google.maps.InfoWindow({
+          content: infoContent
+        });
+
+        marker.addListener('click', () => {
+          infoWindow.open({ anchor: marker, map });
+          handleFocusDriverOnMap(driver);
+        });
+
+        markersRef.current[driver.id] = marker;
+      }
+    });
+  }, [filteredDrivers, statusFilter, searchTerm, vehicleCategoryFilter, isMapReady]);
+
   // 4. Render All Active Fleet Routes with Vehicle-Specific Visual Differentiation
   // 🟢 Green for Motorcycles, 🔵 Blue for Cars, 🟣 Purple for Trucks
   useEffect(() => {
-    const map = leafletMapRef.current;
-    if (!map) return;
+    const map = googleMapRef.current;
+    const google = (window as any).google;
+    if (!map || !google?.maps || !isMapReady) return;
 
     clearAllFleetRoutes();
 
@@ -1007,69 +1042,67 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
         pickupLng = driverLng - 0.005;
       }
 
-      const pts: L.LatLngExpression[] = [];
-      if (pickupLat && pickupLng) pts.push([pickupLat, pickupLng]);
-      pts.push([driverLat, driverLng]);
-      pts.push([destLat, destLng]);
+      const pts: Array<{ lat: number; lng: number }> = [];
+      if (pickupLat && pickupLng) pts.push({ lat: pickupLat, lng: pickupLng });
+      pts.push({ lat: driverLat, lng: driverLng });
+      pts.push({ lat: destLat, lng: destLng });
 
       if (pts.length >= 2) {
         // 1. Glow Polyline Backdrop
-        const glowLine = L.polyline(pts, {
-          color: theme.primaryColor,
-          weight: theme.weight + 4,
-          opacity: 0.28
-        }).addTo(map);
+        const glowLine = new google.maps.Polyline({
+          path: pts,
+          strokeColor: theme.primaryColor,
+          strokeWeight: theme.weight + 4,
+          strokeOpacity: 0.28,
+          map
+        });
 
         // 2. Main Vehicle-Themed Route Polyline
-        const routeLine = L.polyline(pts, {
-          color: theme.primaryColor,
-          weight: theme.weight,
-          opacity: 0.92,
-          dashArray: theme.dashArray
-        }).addTo(map);
-
-        routeLine.bindTooltip(`
-          <div class="p-1 font-sans text-right dir-rtl" dir="rtl">
-            <span class="font-bold text-xs" style="color: ${theme.primaryColor};">${theme.iconEmoji} مسار ${theme.nameAr}</span>
-            <div class="text-[11px] font-bold text-slate-800">${driver.name}</div>
-            <div class="text-[10px] text-slate-500 font-mono">السرعة: ${driver.speed || 0} كم/س | الطلب: ${order?.orderNumber || 'FZ-Live'}</div>
-          </div>
-        `, { sticky: true, direction: 'top' });
-
-        routeLine.on('click', () => {
-          handleFocusDriverOnMap(driver);
+        const routeLine = new google.maps.Polyline({
+          path: pts,
+          strokeColor: theme.primaryColor,
+          strokeWeight: theme.weight,
+          strokeOpacity: 0.92,
+          map
         });
 
         allRoutesPolylinesRef.current.push(glowLine, routeLine);
 
         // Dropoff destination mini pin with theme
         if (destLat && destLng) {
-          const destMiniIcon = L.divIcon({
-            html: `
-              <div class="relative flex items-center justify-center cursor-pointer">
-                <div class="w-6 h-6 rounded-full text-white shadow-md flex items-center justify-center font-bold text-[10px] border-2 border-white" style="background-color: ${theme.primaryColor};">
-                  🎯
-                </div>
-                <div class="absolute -bottom-4 bg-slate-900 text-white text-[9px] font-bold px-1 rounded shadow whitespace-nowrap border" style="border-color: ${theme.primaryColor};">
-                  ${order?.customerName?.split(' ')[0] || driver.name.split(' ')[0]}
-                </div>
-              </div>
-            `,
-            className: 'custom-multi-dest-pin',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
+          const destMiniSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+              <circle cx="14" cy="14" r="12" fill="${theme.primaryColor}" stroke="#ffffff" stroke-width="2" />
+              <text x="14" y="17" font-size="12" text-anchor="middle" dominant-baseline="central">🎯</text>
+            </svg>
+          `.trim();
+
+          const dMiniMarker = createAdvancedMarker({
+            position: { lat: destLat, lng: destLng },
+            map,
+            title: `وجهة تسليم: ${order?.customerName || driver.name}`,
+            svgHtml: destMiniSvg,
+            zIndex: 35
           });
 
-          const dMiniMarker = L.marker([destLat, destLng], { icon: destMiniIcon }).addTo(map);
-          dMiniMarker.bindPopup(`
-            <div class="p-1.5 text-right font-sans" dir="rtl">
-              <span class="text-xs font-bold" style="color: ${theme.primaryColor};">${theme.iconEmoji} وجهة تسليم (${theme.nameAr})</span>
-              <div class="font-bold text-slate-900 text-xs">${order?.customerName || 'عميل فزعة'}</div>
-              <div class="text-[10px] text-slate-500">${order?.dropoffAddress || 'نقطة التسليم'}</div>
-              <div class="text-[10px] text-slate-600 font-mono mt-1">الكابتن: ${driver.name}</div>
-            </div>
-          `);
-          allRoutesMarkersRef.current.push(dMiniMarker);
+          const dMiniInfo = new google.maps.InfoWindow({
+            content: `
+              <div class="p-1.5 text-right font-sans" dir="rtl" style="font-family: sans-serif;">
+                <span class="text-xs font-bold" style="color: ${theme.primaryColor};">${theme.iconEmoji} وجهة تسليم (${theme.nameAr})</span>
+                <div class="font-bold text-slate-900 text-xs">${order?.customerName || 'عميل فزعة'}</div>
+                <div class="text-[10px] text-slate-500">${order?.dropoffAddress || 'نقطة التسليم'}</div>
+                <div class="text-[10px] text-slate-600 font-mono mt-1">الكابتن: ${driver.name}</div>
+              </div>
+            `
+          });
+
+          if (dMiniMarker) {
+            dMiniMarker.addListener('click', () => {
+              dMiniInfo.open({ anchor: dMiniMarker, map });
+            });
+
+            allRoutesMarkersRef.current.push(dMiniMarker);
+          }
         }
       }
     });
@@ -1266,13 +1299,13 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
     clearDriverPath();
     clearActiveDeliveryRoute();
 
-    const map = leafletMapRef.current;
+    const map = googleMapRef.current;
     if (map && driver.lat && driver.lng) {
-      // Zoom in to high-detail level
-      map.flyTo([driver.lat, driver.lng], 16, { duration: 1.2 });
+      map.panTo({ lat: driver.lat, lng: driver.lng });
+      map.setZoom(16);
       const marker = markersRef.current[driver.id];
-      if (marker) {
-        marker.openPopup();
+      if (marker && (window as any).google?.maps?.event) {
+        (window as any).google.maps.event.trigger(marker, 'click');
       }
     }
 
@@ -1440,50 +1473,50 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
           <div className="p-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 text-xs z-10 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-              <span className="font-bold">خريطة المندوبين الحية (OpenStreetMap & Leaflet)</span>
+              <span className="font-bold">خريطة المندوبين الحية (Google Maps Platform)</span>
               <span className="hidden sm:inline-block text-[10px] text-emerald-400 font-mono bg-slate-800 px-2 py-0.5 rounded border border-emerald-900/50">
                 {statusFilter === 'available' ? 'المتاحين للإسناد' : `(${filteredDrivers.length}) كابتن`}
               </span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* Free Tile Layers Selector (No API Key Required) */}
+              {/* Google Map Type Selector */}
               <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
                 <button
-                  onClick={() => switchTileLayer('voyager')}
+                  onClick={() => switchMapType('roadmap')}
                   className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                    tileLayerType === 'voyager' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    mapType === 'roadmap' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
                   }`}
-                  title="خريطة شوارع ناصعة وعصرية"
+                  title="خريطة الشوارع الافتراضية"
                 >
-                  شوارع عصرية
+                  شوارع 🗺️
                 </button>
                 <button
-                  onClick={() => switchTileLayer('osm')}
+                  onClick={() => switchMapType('satellite')}
                   className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                    tileLayerType === 'osm' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    mapType === 'satellite' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
                   }`}
-                  title="خريطة OpenStreetMap الكلاسيكية"
-                >
-                  OSM 🗺️
-                </button>
-                <button
-                  onClick={() => switchTileLayer('satellite')}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                    tileLayerType === 'satellite' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="أقمار صناعية فضائية بدقة عالية مجانية"
+                  title="صور الأقمار الصناعية"
                 >
                   أقمار صناعية 🛰️
                 </button>
                 <button
-                  onClick={() => switchTileLayer('dark')}
+                  onClick={() => switchMapType('hybrid')}
                   className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                    tileLayerType === 'dark' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                    mapType === 'hybrid' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
                   }`}
-                  title="الوضع الليلي الداكن"
+                  title="قمر صناعي مع أسماء الشوارع"
                 >
-                  ليلي 🌙
+                  مختلط 🌐
+                </button>
+                <button
+                  onClick={() => switchMapType('terrain')}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    mapType === 'terrain' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="تضاريس ومرتفعات"
+                >
+                  تضاريس ⛰️
                 </button>
               </div>
 
@@ -1495,8 +1528,11 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
                     key={idx}
                     onClick={() => {
                       setCityCenter({ lat: city.lat, lng: city.lng, zoom: 13 });
-                      const map = leafletMapRef.current;
-                      if (map) map.flyTo([city.lat, city.lng], 13);
+                      const map = googleMapRef.current;
+                      if (map) {
+                        map.panTo({ lat: city.lat, lng: city.lng });
+                        map.setZoom(13);
+                      }
                     }}
                     className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-medium transition-colors cursor-pointer shrink-0"
                   >
@@ -1507,7 +1543,7 @@ export const DriversMapManager: React.FC<DriversMapManagerProps> = ({
             </div>
           </div>
 
-          {/* Map Canvas - Leaflet & OpenStreetMap */}
+          {/* Map Canvas - Google Maps */}
           <div ref={mapContainerRef} className="w-full flex-1 z-0 bg-slate-100 min-h-0" />
 
           {/* Selected Driver Floating Card Overlay */}

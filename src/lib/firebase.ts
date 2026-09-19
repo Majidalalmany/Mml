@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
+  setLogLevel,
   collection, 
   doc, 
   addDoc, 
@@ -11,8 +13,10 @@ import {
   query, 
   where, 
   orderBy, 
+  limit,
   getDocs, 
   getDoc, 
+  getCountFromServer,
   writeBatch, 
   serverTimestamp,
   type DocumentReference,
@@ -38,10 +42,31 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Explicitly pass firestoreDatabaseId from firebase-applet-config.json to prevent connecting to wrong (default) database
-export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Silence internal Firestore connection logs and transient retry warnings
+try {
+  setLogLevel('silent');
+} catch {
+  // Silent fallback
+}
+
+// ⚠️ إعدادات Long Polling القصوى لـ Firestore لتجاوز حظر WebSockets
+let firestoreDb: Firestore;
+try {
+  firestoreDb = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true
+  } as any, "ai-studio-bd261c06-5d49-408e-beda-2e65f193bf2f");
+} catch {
+  // مكتبة Firebase تحظر تمرير experimentalAutoDetect مع experimentalForceLongPolling معاً
+  firestoreDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true
+  }, "ai-studio-bd261c06-5d49-408e-beda-2e65f193bf2f");
+}
+
+export const db: Firestore = firestoreDb;
+
 export const auth: Auth = getAuth(app);
 
 // Re-export Firestore and Auth functions
@@ -56,10 +81,14 @@ export {
   query,
   where,
   orderBy,
+  limit,
   getDocs,
   getDoc,
+  getCountFromServer,
   writeBatch,
   serverTimestamp,
+  initializeFirestore,
+  getFirestore,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,

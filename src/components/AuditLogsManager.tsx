@@ -21,10 +21,27 @@ import {
   Building,
   Package,
   ShoppingBag,
-  Settings
+  Settings,
+  ShieldX,
+  Laptop,
+  Unlock,
+  AlertOctagon
 } from 'lucide-react';
 import { AuditLog, AdminUser } from '../types';
 import { db, collection, query, orderBy, limit, onSnapshot } from '../lib/firebase';
+import { releaseDeviceSecurityBlock } from '../lib/deviceSecurity';
+
+interface BlockedRecord {
+  id: string;
+  ip?: string;
+  deviceId?: string;
+  reason?: string;
+  blockedAt?: string;
+  blockedUntil?: string;
+  attemptedEmails?: string[];
+  totalAttempts?: number;
+  status?: string;
+}
 
 interface AuditLogsManagerProps {
   logs?: AuditLog[];
@@ -43,6 +60,35 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
 }) => {
   const [internalLogs, setInternalLogs] = useState<AuditLog[]>(propLogs);
   const [isComponentLoading, setIsComponentLoading] = useState<boolean>(propLogs.length === 0);
+  const [blockedDevices, setBlockedDevices] = useState<BlockedRecord[]>([]);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+
+  // Subscribe to security_blocks in Firestore
+  useEffect(() => {
+    let unsubBlocks: (() => void) | undefined;
+    try {
+      unsubBlocks = onSnapshot(collection(db, 'security_blocks'), (snap) => {
+        const list: BlockedRecord[] = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(d => (d as any).status === 'active') as BlockedRecord[];
+        setBlockedDevices(list);
+      });
+    } catch (e) {
+      console.warn('Blocked devices subscription warning:', e);
+    }
+
+    return () => {
+      if (unsubBlocks) unsubBlocks();
+    };
+  }, []);
+
+  const handleUnblockDevice = async (record: BlockedRecord) => {
+    if (!record.deviceId && !record.id) return;
+    setUnblockingId(record.id);
+    await releaseDeviceSecurityBlock(record.deviceId || record.id, record.ip);
+    setUnblockingId(null);
+  };
 
   useEffect(() => {
     let unsubLogs: (() => void) | undefined;
@@ -133,6 +179,12 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
   const getSeverityBadge = (sev: AuditLog['severity']) => {
     switch (sev) {
       case 'critical':
+        return {
+          label: 'حظر أمني / حدث حرج 🚨',
+          bg: 'bg-rose-100 text-rose-900 border-rose-300 font-bold',
+          icon: ShieldX,
+          iconColor: 'text-rose-600'
+        };
       case 'error':
         return {
           label: 'خطأ / خلل فني',
@@ -187,6 +239,27 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
               تتبع زمني شامل ومباشر لجميع العمليات، التعديلات، والأحداث التي يتم تنفيذها في النظام مع تفاصيل اسم منفذ العملية وحالتها الفنية.
             </p>
           </div>
+        </div>
+
+        {/* Security Controls */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowBlockedModal(true)}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shadow-md cursor-pointer ${
+              blockedDevices.length > 0 
+                ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+            }`}
+          >
+            <ShieldX className="w-4 h-4" />
+            <span>الأجهزة والـ IPs المحظورة</span>
+            <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+              blockedDevices.length > 0 ? 'bg-white text-rose-600 font-bold' : 'bg-slate-900 text-slate-400'
+            }`}>
+              {blockedDevices.length}
+            </span>
+          </button>
         </div>
 
       </div>
@@ -379,6 +452,115 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Blocked Devices & IPs Management Modal */}
+      {showBlockedModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-gray-200 overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/30">
+                  <ShieldX className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold">الأجهزة وعناوين الـ IP المحظورة تلقائياً</h3>
+                  <p className="text-xs text-slate-400">
+                    قائمة الأجهزة والـ IPs التي تم حظرها بسبب إدخال يوزرات متعددة أو كلمات مرور خاطئة
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBlockedModal(false)}
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-xl text-xs transition cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              {blockedDevices.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <ShieldCheck className="w-12 h-12 text-emerald-500 mx-auto" />
+                  <h4 className="text-sm font-bold text-slate-800">لا توجد أجهزة محظورة حالياً</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    نظام الحماية يعمل بشكل نشط. لم يتم رصد أي هجمات تخمين أو أجهزة متجاوزة لحدود الأمان.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {blockedDevices.map((record) => (
+                    <div 
+                      key={record.id}
+                      className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-lg text-xs">
+                            IP: {record.ip || 'غير معروف'}
+                          </span>
+                          <span className="bg-slate-200 text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded">
+                            Device: {record.deviceId?.slice(0, 16)}...
+                          </span>
+                          <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            حظر نشط
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-700 font-medium">
+                          {record.reason || 'محاولات دخول فاشلة متعددة'}
+                        </p>
+
+                        {record.attemptedEmails && record.attemptedEmails.length > 0 && (
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500 flex-wrap">
+                            <span>الحسابات المستهدفة:</span>
+                            {record.attemptedEmails.map((em, i) => (
+                              <span key={i} className="font-mono text-slate-700 bg-white border border-slate-200 px-1.5 py-0.2 rounded">
+                                {em}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                          <Clock className="w-3 h-3" />
+                          <span>وقت الحظر: {record.blockedAt ? new Date(record.blockedAt).toLocaleString('ar-YE') : 'N/A'}</span>
+                          <span>•</span>
+                          <span>المحاولات: {record.totalAttempts || 0}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUnblockDevice(record)}
+                        disabled={unblockingId === record.id}
+                        className="self-end sm:self-center px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-sm transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <Unlock className="w-3.5 h-3.5" />
+                        <span>{unblockingId === record.id ? 'جاري الفك...' : 'فك الحظر فوراً'}</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+              <span>يمكن أيضاً فك الحظر عبر كود الأمان الطارئ للمدير العام من شاشة الدخول مباشرة.</span>
+              <button
+                type="button"
+                onClick={() => setShowBlockedModal(false)}
+                className="px-4 py-1.5 bg-white border border-slate-300 font-bold rounded-xl text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                تم
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

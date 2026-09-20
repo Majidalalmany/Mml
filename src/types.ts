@@ -392,6 +392,8 @@ export interface Order {
   driverPhone?: string | null;
   invoiceNumber?: string | null;
   invoiceImageUrl?: string | null;
+  invoiceUrl?: string | null;
+  finalPrice?: number;
   invoiceUploadTime?: string | null;
   invoiceDriverId?: string | null;
   invoiceDriverName?: string | null;

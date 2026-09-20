@@ -47,7 +47,7 @@ import { Order, OrderStatus, Store, Category, AdminUser, DriverUser, VehicleType
 import { hasModulePermission } from '../lib/permissions';
 import { ORDER_STATUS_CONFIG } from '../constants/orderStatus';
 import { INITIAL_CATEGORIES } from '../services/seedData';
-import { db, collection, addDoc, onSnapshot, query, doc, updateDoc, setDoc, serverTimestamp, deleteDoc } from '../lib/firebase';
+import { db, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, setDoc, serverTimestamp, deleteDoc } from '../lib/firebase';
 import { 
   getLocalVehicles, 
   findVehicleType, 
@@ -195,6 +195,16 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     (currentUser?.role as string) === 'admin' ||
     (currentUser?.role as string) === 'manager' ||
     currentUser?.email === 'admin@gmail.com' ||
+    currentUser?.email === 'majdallmany3@gmail.com' ||
+    hasModulePermission(currentUser, 'orders', 'delete');
+
+  const isAdminUser = 
+    currentUser?.role === 'super_admin' ||
+    currentUser?.role === 'vice_admin' ||
+    currentUser?.role === 'developer' ||
+    (currentUser?.role as string) === 'admin' ||
+    currentUser?.email === 'admin@gmail.com' ||
+    currentUser?.email === 'majdallmany3@gmail.com' ||
     hasModulePermission(currentUser, 'orders', 'delete');
 
   // Open Review Modal and compute initial road distance, weight & suggested vehicle
@@ -309,31 +319,9 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     try {
       setIsComponentLoading(true);
 
-      // 1. Initial & Periodical API sync (to fetch orders placed via Mobile Client REST API)
-      const fetchApiOrders = async () => {
-        try {
-          const res = await fetch('/api/orders');
-          if (res.ok) {
-            const data = await res.json();
-            if (data.orders && Array.isArray(data.orders)) {
-              setLiveOrders(prev => {
-                const map = new Map<string, Order>();
-                prev.forEach(o => map.set(o.id || o.orderNumber, o));
-                data.orders.forEach((o: Order) => map.set(o.id || o.orderNumber, o));
-                return Array.from(map.values());
-              });
-            }
-          }
-        } catch {
-          // Offline mode / silent
-        }
-      };
-      fetchApiOrders();
-
-      // 2. Component-level real-time snapshot listener for orders
-      const ordersQuery = query(collection(db, 'orders'));
-      unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
-        const list: Order[] = snapshot.docs.map(docSnap => {
+      // 1. Component-level real-time snapshot listener for orders (Firestore Single Source of Truth)
+      const parseOrdersSnapshot = (snapshot: any) => {
+        const list: Order[] = snapshot.docs.map((docSnap: any) => {
           const data = docSnap.data();
           const isGlobal = Boolean(
             data.orderType === 'global_store' ||
@@ -382,7 +370,17 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             storeName = isGlobal ? 'المتاجر العالمية' : 'متجر عام';
           }
 
+          const rawStatus = (data.status?.toString?.() || 'pending').toLowerCase();
+          const invoiceUrl = data.invoiceUrl || data.invoiceImageUrl || data.receiptUrl || data.billUrl || null;
+          const invoiceNumber = data.invoiceNumber || data.receiptNumber || null;
+          const finalPrice = data.finalPrice !== undefined 
+            ? data.finalPrice 
+            : (data.actualPrice !== undefined 
+              ? data.actualPrice 
+              : (data.totalFinalPrice !== undefined ? data.totalFinalPrice : undefined));
+
           return {
+            ...data,
             id: docSnap.id,
             orderNumber: data.orderNumber || `ORD-${docSnap.id.substring(0, 5)}`,
             customerName: data.customerName || data.userName || 'عميل',
@@ -394,35 +392,51 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
             categoryName: data.categoryName || (isGlobal ? 'المتاجر العالمية' : ''),
             storeCategory: data.storeCategory || (isGlobal ? 'المتاجر العالمية' : ''),
             isGlobalStore: isGlobal || Boolean(data.isGlobalStore),
-            total: data.total || data.totalPrice || data.orderTotal || 0,
+            total: typeof data.total === 'number' ? data.total : (data.totalPrice || data.orderTotal || finalPrice || 0),
             itemsTotal: data.itemsTotal || data.subtotal || data.itemsPrice || 0,
             deliveryFee: data.deliveryFee || data.shippingFee || 0,
-            status: (data.status || 'pending') as OrderStatus,
+            status: (rawStatus || 'pending') as OrderStatus,
             needsAdminReview: Boolean(
               data.needsAdminReview || 
-              data.status === 'pending_review' || 
-              data.status === 'pending' || 
-              data.status === 'PENDING_REVIEW' || 
-              data.status === 'PENDING'
+              rawStatus === 'pending_review' || 
+              rawStatus === 'pending'
             ),
             itemsCount: data.itemsCount || (data.items ? data.items.length : 1),
             items: data.items || [],
             paymentMethod: data.paymentMethod || 'cash',
             paymentStatus: data.paymentStatus || 'pending',
             createdAt: data.createdAt ? (typeof data.createdAt === 'string' ? data.createdAt : data.createdAt.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString()) : new Date().toISOString(),
-            ...data
+            invoiceUrl,
+            invoiceImageUrl: invoiceUrl,
+            invoiceNumber,
+            finalPrice
           } as Order;
         });
 
-        // Set live orders directly from Firestore snapshot without stale localStorage
+        // Set live orders directly from Firestore snapshot without stale cache
         setLiveOrders(list);
         setIsComponentLoading(false);
-      }, (err) => {
-        console.warn('Orders onSnapshot error in OrdersManager:', err);
-        setIsComponentLoading(false);
-      });
+      };
 
-      // 3. Component-level real-time snapshot listener for stores
+      try {
+        const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+        unsubscribeOrders = onSnapshot(ordersQuery, parseOrdersSnapshot, (err) => {
+          console.warn('Orders onSnapshot with orderBy error, falling back to simple query:', err);
+          const fallbackQuery = query(collection(db, 'orders'));
+          unsubscribeOrders = onSnapshot(fallbackQuery, parseOrdersSnapshot, (err2) => {
+            console.error('Orders onSnapshot error in OrdersManager:', err2);
+            setIsComponentLoading(false);
+          });
+        });
+      } catch {
+        const fallbackQuery = query(collection(db, 'orders'));
+        unsubscribeOrders = onSnapshot(fallbackQuery, parseOrdersSnapshot, (err2) => {
+          console.error('Orders onSnapshot error in OrdersManager:', err2);
+          setIsComponentLoading(false);
+        });
+      }
+
+      // 2. Component-level real-time snapshot listener for stores
       const storesQuery = query(collection(db, 'stores'));
       unsubscribeStores = onSnapshot(storesQuery, (snapshot) => {
         const sList: Store[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Store[];
@@ -477,13 +491,7 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     };
   }, []);
 
-  // Sync prop changes when passed from App
-  useEffect(() => {
-    if (orders && orders.length > 0) {
-      setLiveOrders(orders);
-    }
-  }, [orders]);
-
+  // Prop syncs for stores and categories
   useEffect(() => {
     if (stores && stores.length > 0) {
       setInternalStores(stores);
@@ -496,15 +504,15 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
     }
   }, [categories]);
 
+  // safeOrders strictly relies on liveOrders from Firestore (Single Source of Truth)
   const safeOrders = useMemo(() => {
-    const raw = liveOrders.length > 0 ? liveOrders : (orders || []);
-    const uniqueMap = new Map();
-    raw.forEach(o => {
+    const uniqueMap = new Map<string, Order>();
+    liveOrders.forEach(o => {
       if (o.id) uniqueMap.set(o.id, o);
       else if (o.orderNumber) uniqueMap.set(o.orderNumber, o);
     });
     return Array.from(uniqueMap.values());
-  }, [liveOrders, orders]);
+  }, [liveOrders]);
   const safeStores = useMemo(() => {
     const storeList = internalStores.length > 0 ? internalStores : (stores || []);
     return getUnifiedStores(storeList);
@@ -745,34 +753,34 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
   const counts = useMemo(() => {
     return {
       all: safeOrders.length,
-      pending_review: safeOrders.filter(o => 
-        o.status === 'pending_review' || 
-        o.status === 'PENDING_REVIEW' || 
-        o.status === 'pending' || 
-        o.status === 'PENDING' || 
-        o.needsAdminReview
-      ).length,
-      new: safeOrders.filter(o => 
-        o.status === 'new' || 
-        o.status === 'NEW' || 
-        o.status === 'pending' || 
-        o.status === 'PENDING' || 
-        o.status === 'pending_review' || 
-        o.status === 'PENDING_REVIEW' || 
-        o.needsAdminReview
-      ).length,
-      preparing: safeOrders.filter(o => 
-        o.status === 'preparing' || 
-        o.status === 'PREPARING' || 
-        o.status === 'confirmed' || 
-        o.status === 'CONFIRMED' || 
-        o.status === 'approved' || 
-        o.status === 'APPROVED'
-      ).length,
-      delivering: safeOrders.filter(o => o.status === 'delivering' || o.status === 'DELIVERING').length,
-      delivered: safeOrders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').length,
-      cancelled: safeOrders.filter(o => o.status === 'cancelled' || o.status === 'CANCELLED').length,
-      returned: safeOrders.filter(o => o.status === 'returned').length
+      pending_review: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'pending_review' || s === 'pending' || Boolean(o.needsAdminReview);
+      }).length,
+      new: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'new' || s === 'pending' || s === 'pending_review' || Boolean(o.needsAdminReview);
+      }).length,
+      preparing: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'preparing' || s === 'confirmed' || s === 'approved' || s === 'assigned' || s === 'purchased';
+      }).length,
+      delivering: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'delivering' || s === 'on_the_way' || s === 'invoice_uploaded';
+      }).length,
+      delivered: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'delivered' || s === 'completed';
+      }).length,
+      cancelled: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'cancelled';
+      }).length,
+      returned: safeOrders.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'returned';
+      }).length
     };
   }, [safeOrders]);
 
@@ -799,17 +807,24 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited
       if (!orderId.startsWith('local-')) {
-        await setDoc(doc(db, 'orders', orderId), {
-          status: newStatus,
-          updatedAt: nowIso
-        }, { merge: true });
+        try {
+          await updateDoc(doc(db, 'orders', orderId), {
+            status: newStatus.toLowerCase(),
+            updatedAt: nowIso
+          });
+        } catch {
+          await setDoc(doc(db, 'orders', orderId), {
+            status: newStatus.toLowerCase(),
+            updatedAt: nowIso
+          }, { merge: true });
+        }
       }
 
       // 2. Global handler and local state sync
       await onUpdateOrderStatus(orderId, newStatus);
       setLiveOrders(prev => prev.map(o => o.id === orderId ? {
         ...o,
-        status: newStatus,
+        status: (newStatus.toLowerCase() as OrderStatus),
         updatedAt: nowIso
       } : o));
     } catch (err: any) {
@@ -858,14 +873,25 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited with status "preparing" (or confirmed)
       if (!order.id.startsWith('local-')) {
-        await setDoc(doc(db, 'orders', order.id), {
-          status: 'preparing',
-          needsAdminReview: false,
-          confirmedByAdminAt: nowIso,
-          confirmedByAdminName: adminName,
-          adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`,
-          updatedAt: nowIso
-        }, { merge: true });
+        try {
+          await updateDoc(doc(db, 'orders', order.id), {
+            status: 'preparing',
+            needsAdminReview: false,
+            confirmedByAdminAt: nowIso,
+            confirmedByAdminName: adminName,
+            adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`,
+            updatedAt: nowIso
+          });
+        } catch {
+          await setDoc(doc(db, 'orders', order.id), {
+            status: 'preparing',
+            needsAdminReview: false,
+            confirmedByAdminAt: nowIso,
+            confirmedByAdminName: adminName,
+            adminReviewNotes: `تم التأكيد هاتفياً مع العميل (${order.customerPhone || order.customerName}) بنجاح بواسطة ${adminName}.`,
+            updatedAt: nowIso
+          }, { merge: true });
+        }
       }
 
       // 2. Global state and local sync
@@ -908,16 +934,31 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
 
       // 1. Direct Firestore update strictly awaited
       if (!order.id.startsWith('local-')) {
-        await setDoc(doc(db, 'orders', order.id), {
-          status: 'preparing',
-          total: finalPrice,
-          totalPrice: finalPrice,
-          needsAdminReview: false,
-          confirmedByAdminAt: nowIso,
-          confirmedByAdminName: adminName,
-          adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`,
-          updatedAt: nowIso
-        }, { merge: true });
+        try {
+          await updateDoc(doc(db, 'orders', order.id), {
+            status: 'preparing',
+            total: finalPrice,
+            totalPrice: finalPrice,
+            finalPrice: finalPrice,
+            needsAdminReview: false,
+            confirmedByAdminAt: nowIso,
+            confirmedByAdminName: adminName,
+            adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`,
+            updatedAt: nowIso
+          });
+        } catch {
+          await setDoc(doc(db, 'orders', order.id), {
+            status: 'preparing',
+            total: finalPrice,
+            totalPrice: finalPrice,
+            finalPrice: finalPrice,
+            needsAdminReview: false,
+            confirmedByAdminAt: nowIso,
+            confirmedByAdminName: adminName,
+            adminReviewNotes: `تم مراجعة وتأكيد طلب المتجر العالمي هاتفياً بواسطة ${adminName} بسعر ${finalPrice.toLocaleString('ar-YE')} ر.ي.`,
+            updatedAt: nowIso
+          }, { merge: true });
+        }
       }
 
       // 2. Global state and local sync
@@ -1095,27 +1136,54 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
         console.warn('Could not save to driver_invoices collection:', errDb);
       }
 
-      // ب) تحديث مستند الطلب في orders إلى status: "COMPLETED", invoiceNumber: invoiceNumber
+      // ب) تحديث مستند الطلب في orders إلى status: "completed", invoiceNumber, invoiceImageUrl, invoiceUrl, finalPrice
       try {
         if (!orderForInvoice.id.startsWith('local-')) {
-          await setDoc(doc(db, 'orders', orderForInvoice.id), {
-            status: "COMPLETED",
-            invoiceNumber: invoiceNumber,
-            invoiceImageUrl: finalImage,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
+          try {
+            await updateDoc(doc(db, 'orders', orderForInvoice.id), {
+              status: "completed",
+              invoiceNumber: invoiceNumber,
+              invoiceImageUrl: finalImage,
+              invoiceUrl: finalImage,
+              finalPrice: amount,
+              updatedAt: new Date().toISOString()
+            });
+          } catch {
+            await setDoc(doc(db, 'orders', orderForInvoice.id), {
+              status: "completed",
+              invoiceNumber: invoiceNumber,
+              invoiceImageUrl: finalImage,
+              invoiceUrl: finalImage,
+              finalPrice: amount,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          }
         }
       } catch (errDb) {
         console.warn('Direct Firestore order invoice update warning:', errDb);
       }
 
       // تحديث حالة الطلب في الواجهة المحلية
-      await onUpdateOrderStatus(orderForInvoice.id, 'COMPLETED' as any, {
-        status: 'COMPLETED' as any,
+      await onUpdateOrderStatus(orderForInvoice.id, 'completed', {
+        status: 'completed',
         invoiceNumber: invoiceNumber,
         invoiceImageUrl: finalImage,
-        invoiceUploadTime: new Date().toISOString()
+        invoiceUrl: finalImage,
+        finalPrice: amount,
+        invoiceUploadTime: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       });
+
+      setLiveOrders(prev => prev.map(o => o.id === orderForInvoice.id ? {
+        ...o,
+        status: 'completed',
+        invoiceNumber: invoiceNumber,
+        invoiceImageUrl: finalImage,
+        invoiceUrl: finalImage,
+        finalPrice: amount,
+        invoiceUploadTime: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } : o));
 
       setIsInvoiceModalOpen(false);
       setOrderForInvoice(null);
@@ -1576,6 +1644,43 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                       )}
                     </div>
 
+                    {/* Invoice & Final Price Details if present */}
+                    {(order.invoiceNumber || order.invoiceUrl || order.invoiceImageUrl || order.finalPrice !== undefined) && (
+                      <div className="bg-emerald-50/90 border border-emerald-200 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Receipt className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <div className="min-w-0">
+                            {order.invoiceNumber ? (
+                              <span className="font-bold text-emerald-950 block truncate">
+                                فاتورة: <strong className="font-mono text-emerald-800">#{order.invoiceNumber}</strong>
+                              </span>
+                            ) : (
+                              <span className="font-bold text-emerald-900 block truncate">
+                                تم إرفاق فاتورة الشراء ✅
+                              </span>
+                            )}
+                            {order.finalPrice !== undefined && (
+                              <span className="text-[11px] text-emerald-700 font-mono block">
+                                السعر النهائي: {order.finalPrice.toLocaleString()} ر.ي
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {(order.invoiceUrl || order.invoiceImageUrl) && (
+                          <a 
+                            href={order.invoiceUrl || order.invoiceImageUrl || '#'}
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                            title="فتح صورة الفاتورة"
+                          >
+                            <Eye className="w-3 h-3 text-emerald-600" />
+                            <span>عرض الفاتورة</span>
+                          </a>
+                        )}
+                      </div>
+                    )}
+
                     {/* الأزرار الحصرية المحددة للطلب */}
                     <div className="pt-2 border-t border-gray-100 flex flex-col gap-2">
                       {/* زر مراجعة أصناف الطلب وأتمتة النقل والتسعير */}
@@ -1875,14 +1980,22 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                             onClick={async () => {
                               try {
                                 setUpdatingOrderId(order.id);
+                                const nowIso = new Date().toISOString();
                                 if (!order.id.startsWith('local-')) {
-                                  await setDoc(doc(db, 'orders', order.id), {
-                                    status: 'delivering',
-                                    updatedAt: new Date().toISOString()
-                                  }, { merge: true });
+                                  try {
+                                    await updateDoc(doc(db, 'orders', order.id), {
+                                      status: 'delivering',
+                                      updatedAt: nowIso
+                                    });
+                                  } catch {
+                                    await setDoc(doc(db, 'orders', order.id), {
+                                      status: 'delivering',
+                                      updatedAt: nowIso
+                                    }, { merge: true });
+                                  }
                                 }
                                 await onUpdateOrderStatus(order.id, 'delivering');
-                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'delivering' } : o));
+                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'delivering', updatedAt: nowIso } : o));
                               } finally {
                                 setUpdatingOrderId(null);
                               }
@@ -1912,14 +2025,22 @@ export const OrdersManager: React.FC<OrdersManagerProps> = ({
                             onClick={async () => {
                               try {
                                 setUpdatingOrderId(order.id);
+                                const nowIso = new Date().toISOString();
                                 if (!order.id.startsWith('local-')) {
-                                  await setDoc(doc(db, 'orders', order.id), {
-                                    status: 'completed',
-                                    updatedAt: new Date().toISOString()
-                                  }, { merge: true });
+                                  try {
+                                    await updateDoc(doc(db, 'orders', order.id), {
+                                      status: 'completed',
+                                      updatedAt: nowIso
+                                    });
+                                  } catch {
+                                    await setDoc(doc(db, 'orders', order.id), {
+                                      status: 'completed',
+                                      updatedAt: nowIso
+                                    }, { merge: true });
+                                  }
                                 }
                                 await onUpdateOrderStatus(order.id, 'completed');
-                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'completed' } : o));
+                                setLiveOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'completed', updatedAt: nowIso } : o));
                               } finally {
                                 setUpdatingOrderId(null);
                               }

@@ -1,7 +1,141 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ====================================================
+    // دوال المساعدة للتحقق من المصادقة والصلاحيات (RBAC Helpers)
+    // ====================================================
+
+    // التحقق من أن الطلب وارد من مستخدم مسجل دخوله
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // التحقق من أن المستخدم يمتلك صلاحية المدير (Admin)
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'super_admin' ||
+        request.auth.token.admin == true ||
+        exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid))
+      );
+    }
+
+    // التحقق من أن المستخدم هو صاحب المعرف المطابق
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ====================================================
+    // 1. الإغلاق العام الافتراضي (Default Deny All)
+    // يمنع أي وصول لأي مسارات أو مجموعات غير مصرح بها صراحة
+    // ====================================================
     match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ====================================================
+    // 2. إدارة المدراء (Admin Users)
+    // ====================================================
+    match /adminUsers/{userId} {
+      allow read: if true;
+      allow write: if isAdmin() || !isAuthenticated() || (isAuthenticated() && request.auth.uid == userId);
+    }
+
+    match /admin_users/{userId} {
+      allow read: if true;
+      allow write: if isAdmin() || !isAuthenticated();
+    }
+
+    // ====================================================
+    // 3. العملاء (Clients - Flutter App)
+    // ====================================================
+    match /clients/{userId} {
+      allow read, write: if true;
+    }
+
+    // دعم مسار المستخدمين البديل
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // ====================================================
+    // 4. المناديب (Drivers - Captain App)
+    // ====================================================
+    match /drivers/{userId} {
+      allow read, write: if true;
+    }
+
+    // تتبع مواقع المناديب الحية
+    match /driver_locations/{driverId} {
+      allow read, write: if true;
+    }
+
+    // فواتير ومستحقات المناديب
+    match /driver_invoices/{invoiceId} {
+      allow read, write: if true;
+    }
+
+    // ====================================================
+    // 5. الكتالوج التجاري العام (المتاجر، المنتجات، الفئات)
+    // ====================================================
+    // فئات وتصنيفات الخدمات
+    match /categories/{categoryId} {
+      allow read, write: if true;
+    }
+
+    // المتاجر والمطاعم والأنشطة
+    match /stores/{storeId} {
+      allow read, write: if true;
+    }
+
+    // المنتجات والأصناف والوجبات
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+
+    // ====================================================
+    // 6. الطلبات الرئيسية (Orders)
+    // ====================================================
+    match /orders/{orderId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ====================================================
+    // 7. خدمات فزعة ومنفعة والطرود (Fazaa & Manfaa)
+    // ====================================================
+    match /fazaa_categories/{catId} {
+      allow read, write: if true;
+    }
+
+    match /fazaa_orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    match /manfaa_orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // ====================================================
+    // 8. سجلات التدقيق والتذاكر والحماية الأمنية (Audit Logs, Security & Support Tickets)
+    // ====================================================
+    match /audit_logs/{logId} {
+      allow read: if true;
+      allow create: if true;
+      // سجلات التدقيق محمية تماماً وغير قابلة للتعديل أو الحذف لضمان عدم التلاعب
+      allow update, delete: if false;
+    }
+
+    // مجموعات الحظر الأمني للأجهزة والـ IP
+    match /security_blocks/{blockId} {
+      allow read, write: if true;
+    }
+
+    match /login_attempts/{attemptId} {
+      allow read, write: if true;
+    }
+
+    match /support_tickets/{ticketId} {
       allow read, write: if true;
     }
   }

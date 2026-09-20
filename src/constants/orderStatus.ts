@@ -23,7 +23,11 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   pending_review: 'جديد',
   PENDING_REVIEW: 'جديد',
   returned: 'ملغي',
-};
+  invoice_uploaded: 'تم رفع الفاتورة',
+  purchased: 'تم الشراء',
+  on_the_way: 'قيد التوصيل',
+  assigned: 'قيد التحضير',
+} as any;
 
 export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
   label: string;
@@ -192,5 +196,37 @@ export const ORDER_STATUS_CONFIG: Record<OrderStatus, {
     iconColor: 'text-slate-600',
     borderColor: 'border-slate-300',
     Icon: RotateCcw
+  },
+  invoice_uploaded: {
+    label: 'تم رفع الفاتورة',
+    badgeClass: 'bg-emerald-100 text-emerald-950 border-emerald-300',
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-emerald-600',
+    borderColor: 'border-emerald-300',
+    Icon: CheckCircle2
+  },
+  purchased: {
+    label: 'تم الشراء',
+    badgeClass: 'bg-blue-100 text-blue-950 border-blue-300',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-600',
+    borderColor: 'border-blue-300',
+    Icon: CheckCircle2
+  },
+  on_the_way: {
+    label: 'قيد التوصيل',
+    badgeClass: 'bg-purple-100 text-purple-900 border-purple-300',
+    iconBg: 'bg-purple-50',
+    iconColor: 'text-purple-600',
+    borderColor: 'border-purple-300',
+    Icon: Truck
+  },
+  assigned: {
+    label: 'قيد التحضير / تم الإسناد',
+    badgeClass: 'bg-blue-100 text-blue-900 border-blue-300',
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-blue-600',
+    borderColor: 'border-blue-300',
+    Icon: Utensils
   }
-};
+} as any;

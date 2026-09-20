@@ -147,15 +147,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPass = password.trim();
+    const cleanIdentifier = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
 
-    if (!cleanEmail) {
-      setError('يرجى كتابة البريد الإلكتروني');
+    if (!cleanIdentifier) {
+      setError('يرجى كتابة البريد الإلكتروني أو رقم الهاتف');
       return;
     }
 
-    if (!cleanPass) {
+    if (!cleanPassword) {
       setError('يرجى كتابة كلمة المرور');
       return;
     }
@@ -163,216 +163,112 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsLoading(true);
 
     try {
-      // 1. Configure Firebase Auth Persistence
+      // Configure Firebase Auth Persistence
       await setPersistence(
         auth, 
         rememberMe ? browserLocalPersistence : browserSessionPersistence
       ).catch((err) => console.warn('Auth persistence set failed:', err));
 
-      // 2. Official Firebase Auth Sign In (with auto-provisioning for unregistered admin accounts)
-      let user: any = null;
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-        user = userCredential.user;
-      } catch (authErr: any) {
-        console.log('Firebase Auth sign in attempt:', authErr?.code);
-        if (
-          authErr?.code === 'auth/invalid-credential' ||
-          authErr?.code === 'auth/user-not-found'
-        ) {
-          // Check if this account has not been registered in Firebase Auth yet
-          try {
-            const createCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
-            user = createCred.user;
-            console.log('Successfully provisioned Firebase Auth user:', user.uid);
-          } catch (createErr: any) {
-            console.log('Provision attempt result:', createErr?.code);
-            if (createErr?.code === 'auth/email-already-in-use') {
-              // Email exists in Auth, which confirms the password entered was wrong
-              throw authErr;
-            } else {
-              throw createErr;
-            }
-          }
-        } else {
-          throw authErr;
+      // 1. Search inside adminUsers snapshot for strict match
+      const snapshot = await getDocs(collection(db, 'adminUsers'));
+      let foundUser: any = null;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const docEmail = (data.email || '').trim().toLowerCase();
+        const docPhone = (data.phone || '').trim();
+        const docPassword = (data.password || '').trim();
+
+        // المطابقة الصارمة: يجب أن يتطابق الإيميل والباسوورد في نفس المستند
+        if ((docEmail === cleanIdentifier || docPhone === cleanIdentifier) && docPassword === cleanPassword) {
+          foundUser = { id: doc.id, ...data };
         }
-      }
+      });
 
-      if (!user) {
-        throw new Error('فشل التحقق من هوية المستخدم.');
-      }
-
-      // 3. Fetch Admin User Document directly via user.uid
-      let userDoc = await getDoc(doc(db, 'adminUsers', user.uid));
-      let userData = userDoc.exists() ? userDoc.data() : null;
-
-      // If document does not exist by user.uid, try finding existing record by email
-      if (!userData) {
+      // Fallback check in admin_users collection if not found
+      if (!foundUser) {
         try {
-          const emailQuery = query(collection(db, 'adminUsers'), where('email', '==', cleanEmail));
-          const querySnap = await getDocs(emailQuery);
-          if (!querySnap.empty) {
-            userData = querySnap.docs[0].data();
-            // Sync/migrate to UID doc so future reads are instantaneous
-            await setDoc(doc(db, 'adminUsers', user.uid), {
-              ...userData,
-              email: cleanEmail,
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-          }
-        } catch (searchErr) {
-          console.warn('Query by email warning:', searchErr);
+          const fallbackSnap = await getDocs(collection(db, 'admin_users'));
+          fallbackSnap.forEach((doc) => {
+            const data = doc.data();
+            const docEmail = (data.email || '').trim().toLowerCase();
+            const docPhone = (data.phone || '').trim();
+            const docPassword = (data.password || '').trim();
+
+            if ((docEmail === cleanIdentifier || docPhone === cleanIdentifier) && docPassword === cleanPassword) {
+              foundUser = { id: doc.id, ...data };
+            }
+          });
+        } catch {
+          // Ignore
         }
       }
 
-      if (userData) {
-        if (userData.status === 'suspended') {
+      // Check props users if provided
+      if (!foundUser && users && users.length > 0) {
+        for (const u of users) {
+          const docEmail = (u.email || '').trim().toLowerCase();
+          const docPhone = (u.phone || '').trim();
+          const docPassword = (u.password || '').trim();
+          if ((docEmail === cleanIdentifier || docPhone === cleanIdentifier) && docPassword === cleanPassword) {
+            foundUser = u;
+            break;
+          }
+        }
+      }
+
+      // Direct Super Admin fallback
+      if (!foundUser && cleanIdentifier === 'majdallmany3@gmail.com' && (cleanPassword === 'admin123' || cleanPassword === 'jahez@admin#2026')) {
+        foundUser = {
+          id: 'SjYDBWFByAX0mzaMwXrfJHyJN4E3',
+          name: 'مجد الألماني (المدير العام)',
+          email: 'majdallmany3@gmail.com',
+          role: 'super_admin',
+          status: 'active',
+          phone: '777000111'
+        };
+      }
+
+      // 2. If valid matching user found
+      if (foundUser) {
+        if (foundUser.status === 'suspended') {
           setError('🔒 حساب الإدارة هذا موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
-          await signOut(auth);
-          setIsLoading(false);
           return;
         }
 
+        // Try background Firebase Auth session sync if possible
+        try {
+          if (foundUser.email && cleanPassword) {
+            await signInWithEmailAndPassword(auth, foundUser.email, cleanPassword).catch(() => {});
+          }
+        } catch {
+          // Ignore
+        }
+
         const adminUser: AdminUser = {
-          id: user.uid,
-          name: userData.name || user.displayName || cleanEmail.split('@')[0],
-          email: userData.email || user.email || cleanEmail,
-          role: normalizeRole(userData.role || (cleanEmail === 'majdallmany3@gmail.com' ? 'super_admin' : 'vice_admin')),
-          status: userData.status || 'active',
-          phone: userData.phone || '',
-          permissions: userData.permissions,
-          storeId: userData.storeId || 'all',
-          avatarUrl: userData.avatarUrl,
-          createdAt: userData.createdAt || new Date().toISOString()
+          id: foundUser.id || 'admin_' + Date.now(),
+          name: foundUser.name || cleanIdentifier.split('@')[0],
+          email: foundUser.email || cleanIdentifier,
+          role: normalizeRole(foundUser.role || (cleanIdentifier === 'majdallmany3@gmail.com' ? 'super_admin' : 'vice_admin')),
+          status: foundUser.status || 'active',
+          phone: foundUser.phone || '',
+          permissions: foundUser.permissions,
+          storeId: foundUser.storeId || 'all',
+          avatarUrl: foundUser.avatarUrl,
+          createdAt: foundUser.createdAt || new Date().toISOString()
         };
 
-        // Clear any prior failed attempts counters on success
+        // Clear failed attempts counter on success
         clearLoginAttemptCounters();
         onLoginSuccess(adminUser, rememberMe);
-      } else {
-        // Construct valid default AdminUser profile and persist for future sessions
-        const defaultRole: RoleType = cleanEmail === 'majdallmany3@gmail.com' ? 'super_admin' : 'vice_admin';
-        const fallbackUser: AdminUser = {
-          id: user.uid,
-          name: user.displayName || cleanEmail.split('@')[0],
-          email: user.email || cleanEmail,
-          role: defaultRole,
-          status: 'active',
-          phone: user.phoneNumber || '',
-          storeId: 'all',
-          createdAt: new Date().toISOString()
-        };
-
-        try {
-          await setDoc(doc(db, 'adminUsers', user.uid), fallbackUser, { merge: true });
-        } catch (setErr) {
-          console.warn('Set fallback admin user warning:', setErr);
-        }
-
-        clearLoginAttemptCounters();
-        onLoginSuccess(fallbackUser, rememberMe);
-      }
-    } catch (authErr: any) {
-      console.warn('Firebase Auth sign in issue:', authErr?.code || authErr?.message);
-
-      // Handle rate-limiting (auth/too-many-requests) with direct secure fallback
-      if (authErr?.code === 'auth/too-many-requests') {
-        console.warn('Firebase Auth rate limited. Performing secure direct verification fallback...');
-        try {
-          // 1. Primary super admin shortcut
-          if (cleanEmail === 'majdallmany3@gmail.com' && (cleanPass === 'admin123' || cleanPass.length >= 6)) {
-            const primaryAdmin: AdminUser = {
-              id: 'SjYDBWFByAX0mzaMwXrfJHyJN4E3',
-              name: 'مجد الألماني (المدير العام المباشر)',
-              email: 'majdallmany3@gmail.com',
-              role: 'super_admin',
-              status: 'active',
-              phone: '777000111',
-              storeId: 'all',
-              createdAt: new Date().toISOString()
-            };
-            clearLoginAttemptCounters();
-            onLoginSuccess(primaryAdmin, rememberMe);
-            return;
-          }
-
-          // 2. Query Firestore adminUsers directly
-          const q = query(collection(db, 'adminUsers'), where('email', '==', cleanEmail));
-          const querySnap = await getDocs(q);
-
-          if (!querySnap.empty) {
-            // Check password
-            const matchedDoc = querySnap.docs.find(d => {
-              const data = d.data();
-              return data.password === cleanPass;
-            });
-
-            if (matchedDoc) {
-              const data = matchedDoc.data();
-              if (data.status === 'suspended') {
-                setError('🔒 حساب الإدارة هذا موقوف مؤقتاً. يرجى التواصل مع المدير العام.');
-                return;
-              }
-              const adminUser: AdminUser = {
-                id: matchedDoc.id,
-                name: data.name || cleanEmail.split('@')[0],
-                email: cleanEmail,
-                role: normalizeRole(data.role),
-                status: data.status || 'active',
-                phone: data.phone || '',
-                permissions: data.permissions,
-                storeId: data.storeId || 'all',
-                avatarUrl: data.avatarUrl,
-                createdAt: data.createdAt || new Date().toISOString()
-              };
-              clearLoginAttemptCounters();
-              onLoginSuccess(adminUser, rememberMe);
-              return;
-            } else {
-              // Password wrong in fallback mode -> record failed attempt & check ban
-              await registerFailureAndCheckBan(cleanEmail, 'كلمة المرور غير صحيحة.');
-              return;
-            }
-          }
-
-          // 3. Check props users if provided
-          if (users && users.length > 0) {
-            const matchedUser = users.find(u => 
-              u.email?.toLowerCase().trim() === cleanEmail && (u.password === cleanPass || cleanPass === 'password123')
-            );
-            if (matchedUser) {
-              if (matchedUser.status === 'suspended') {
-                setError('🔒 حساب الإدارة هذا موقوف مؤقتاً.');
-                return;
-              }
-              clearLoginAttemptCounters();
-              onLoginSuccess(matchedUser, rememberMe);
-              return;
-            }
-          }
-        } catch (fallbackErr) {
-          console.error('Fallback verification error:', fallbackErr);
-        }
-
-        await registerFailureAndCheckBan(cleanEmail, 'تم رصد محاولات دخول متكررة ببيانات غير متطابقة.');
         return;
       }
 
-      // If credentials failed, record attempt and check if auto-ban threshold is reached
-      if (
-        authErr?.code === 'auth/user-not-found' || 
-        authErr?.code === 'auth/wrong-password' || 
-        authErr?.code === 'auth/invalid-credential'
-      ) {
-        await registerFailureAndCheckBan(cleanEmail);
-      } else if (authErr?.code === 'auth/invalid-email') {
-        setError('صيغة البريد الإلكتروني غير صالحة. يرجى إدخال بريد صالح (مثال: admin@jahezye.com).');
-      } else if (authErr?.code === 'auth/user-disabled') {
-        setError('تم تعطيل هذا الحساب من قبل إدارة النظام.');
-      } else {
-        setError(authErr?.message || 'تعذر تسجيل الدخول. يرجى التأكد من بيانات الاعتماد والاتصال.');
-      }
+      // 3. No match found -> trigger brute-force protection and device security check
+      await registerFailureAndCheckBan(cleanIdentifier, 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+    } catch (err: any) {
+      console.error('Error during strict login process:', err);
+      await registerFailureAndCheckBan(cleanIdentifier, 'تعذر التحقق من بيانات الدخول. تأكد من صحة البريد وكلمة المرور.');
     } finally {
       setIsLoading(false);
     }
